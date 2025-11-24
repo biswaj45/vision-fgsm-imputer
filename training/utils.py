@@ -32,9 +32,11 @@ def fgsm(
     was_training = model.training
     model.eval()
     
-    # Default target is the input itself (reconstruction attack)
+    # For U-Net that outputs perturbations, we want adversarial examples
+    # that make the model produce different perturbations
     if target is None:
-        target = x.clone()
+        # Generate random target perturbations to maximize confusion
+        target = torch.randn_like(x) * 0.1
     
     # Default loss function
     if loss_fn is None:
@@ -43,15 +45,15 @@ def fgsm(
     # Ensure x requires grad
     x_adv = x.clone().detach().requires_grad_(True)
     
-    # Forward pass
-    output = model(x_adv)
-    
-    # Compute loss
-    loss = loss_fn(output, target)
-    
-    # Backward pass to get gradients
-    model.zero_grad()
-    loss.backward()
+    # Forward pass - model outputs perturbation, not reconstruction
+    with torch.enable_grad():
+        output = model(x_adv)
+        
+        # Compute loss
+        loss = loss_fn(output, target)
+        
+        # Backward pass to get gradients
+        loss.backward()
     
     # Generate perturbation using sign of gradients
     with torch.no_grad():
