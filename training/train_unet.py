@@ -56,9 +56,9 @@ class Trainer:
         # Create model
         model_type = config.get('model_type', 'unet')
         if model_type == 'unet':
-            self.model = create_tiny_unet().to(device)
+            self.model = create_tiny_unet().to(self.device)
         else:
-            self.model = create_autoencoder().to(device)
+            self.model = create_autoencoder().to(self.device)
         
         # Loss function
         self.criterion = nn.MSELoss()
