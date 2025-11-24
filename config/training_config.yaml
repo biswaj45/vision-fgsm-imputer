@@ -9,7 +9,7 @@ batch_size: 16
 num_epochs: 50
 learning_rate: 0.001
 weight_decay: 0.00001
-epsilon: 0.02  # FGSM perturbation magnitude
+epsilon: 0.05  # FGSM perturbation magnitude (increased for stronger protection)
 
 # Data settings
 image_size: 256

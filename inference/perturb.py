@@ -10,8 +10,9 @@ from typing import Union
 def generate_perturbation(
     model: torch.nn.Module,
     image: torch.Tensor,
-    epsilon: float = 0.02,
-    device: str = 'cpu'
+    epsilon: float = 0.05,
+    device: str = 'cpu',
+    boost_strength: float = 1.5
 ) -> torch.Tensor:
     """
     Generate perturbation map using the trained model.
@@ -21,9 +22,10 @@ def generate_perturbation(
         image: Input image tensor [B, C, H, W] or [C, H, W]
         epsilon: Perturbation scale
         device: Device to run on
+        boost_strength: Multiplier for stronger protection (default 1.5)
     
     Returns:
-        Perturbation tensor in range [-epsilon, epsilon]
+        Perturbation tensor in range [-epsilon*boost_strength, epsilon*boost_strength]
     """
     model.eval()
     
@@ -39,8 +41,8 @@ def generate_perturbation(
         # Generate raw perturbation (range: -1 to 1)
         perturbation = model(image)
         
-        # Scale to epsilon range
-        perturbation = perturbation * epsilon
+        # Scale to epsilon range with boost
+        perturbation = perturbation * epsilon * boost_strength
     
     if squeeze_output:
         perturbation = perturbation.squeeze(0)

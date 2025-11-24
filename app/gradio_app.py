@@ -127,7 +127,8 @@ class AntiDeepfakeApp:
             cv2.putText(output, "Protected", (w + 10, 30), font, 0.7, (255, 255, 255), 2)
             cv2.putText(output, "Difference", (2*w + 10, 30), font, 0.7, (255, 255, 255), 2)
         else:
-            output = create_side_by_side(image, perturbed_img, add_labels=True)
+            # Show only protected image
+            output = perturbed_img
         
         # Create info text
         info = f"✓ Processing complete!\n\n"
@@ -171,17 +172,18 @@ class AntiDeepfakeApp:
                     with gr.Row():
                         epsilon_slider = gr.Slider(
                             minimum=0.01,
-                            maximum=0.1,
-                            value=self.epsilon,
-                            step=0.005,
+                            maximum=0.2,
+                            value=0.05,
+                            step=0.01,
                             label="Perturbation Strength (ε)",
-                            info="Higher = stronger protection but more visible"
+                            info="Higher = stronger protection. Start with 0.05, increase if needed."
                         )
                     
                     with gr.Row():
                         show_heatmap = gr.Checkbox(
-                            label="Show Difference Heatmap",
-                            value=True
+                            label="Show Comparison View (Original | Protected | Difference)",
+                            value=False,
+                            info="Uncheck to show only the protected image"
                         )
                         add_badge = gr.Checkbox(
                             label="Add Protection Badge",
