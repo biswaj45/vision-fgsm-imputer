@@ -33,7 +33,7 @@ def get_training_transforms(image_size: int = 256) -> A.Compose:
             val_shift_limit=10,
             p=0.5
         ),
-        A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+        A.GaussNoise(var_limit=(0.001, 0.01), p=0.3),
         A.OneOf([
             A.MotionBlur(blur_limit=3, p=1.0),
             A.GaussianBlur(blur_limit=3, p=1.0),
