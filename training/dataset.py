@@ -203,7 +203,7 @@ def create_dataloaders(
 
 if __name__ == "__main__":
     # Test dataset
-    from transforms import get_training_transforms
+    from training.transforms import get_training_transforms
     
     # Create dummy data directory for testing
     test_dir = "./test_data"

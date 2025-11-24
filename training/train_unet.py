@@ -4,6 +4,7 @@ Includes training loop, checkpointing, and TensorBoard logging.
 """
 
 import os
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,11 +16,14 @@ import yaml
 from typing import Dict, Any, Optional
 import time
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from models.unet_tiny import create_tiny_unet
 from models.autoencoder import create_autoencoder
-from dataset import create_dataloaders
-from transforms import get_training_transforms, get_validation_transforms
-from utils import fgsm
+from training.dataset import create_dataloaders
+from training.transforms import get_training_transforms, get_validation_transforms
+from training.utils import fgsm
 
 
 class Trainer:

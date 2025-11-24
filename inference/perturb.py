@@ -119,6 +119,9 @@ def adaptive_perturbation(
 
 if __name__ == "__main__":
     # Test perturbation generation
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
     from models.unet_tiny import create_tiny_unet
     
     model = create_tiny_unet()

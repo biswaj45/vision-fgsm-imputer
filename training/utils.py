@@ -148,6 +148,9 @@ def generate_fgsm_training_pair(
 
 if __name__ == "__main__":
     # Test FGSM
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
     from models.unet_tiny import create_tiny_unet
     
     model = create_tiny_unet()
