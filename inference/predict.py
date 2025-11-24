@@ -3,17 +3,20 @@ Main prediction API for inference.
 Simple interface: impute_noise("input.jpg", model_path="model.pth")
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import torch
 import cv2
 import numpy as np
-from pathlib import Path
 from typing import Union, Optional
 import time
 
 from models.unet_tiny import create_tiny_unet
 from models.autoencoder import create_autoencoder
-from perturb import generate_perturbation, apply_perturbation_tensor
-from postprocess import image_to_tensor, tensor_to_image, denormalize_image
+from inference.perturb import generate_perturbation, apply_perturbation_tensor
+from inference.postprocess import image_to_tensor, tensor_to_image, denormalize_image
 
 
 class NoiseImputer:
