@@ -1,0 +1,62 @@
+# Training configuration for anti-deepfake model
+
+# Model settings
+model_type: unet  # Options: 'unet' or 'autoencoder'
+latent_dim: 128  # Only for autoencoder
+
+# Training hyperparameters
+batch_size: 16
+num_epochs: 50
+learning_rate: 0.001
+weight_decay: 0.00001
+epsilon: 0.02  # FGSM perturbation magnitude
+
+# Data settings
+image_size: 256
+num_workers: 4
+pin_memory: true
+
+# Dataset paths
+train_dir: ./data/train
+val_dir: ./data/val
+max_samples: null  # Set to limit dataset size, null for all
+
+# Output settings
+output_dir: ./outputs
+save_frequency: 5  # Save checkpoint every N epochs
+
+# Augmentation settings
+augmentation:
+  horizontal_flip: true
+  brightness_contrast: 0.2
+  hue_saturation: 0.1
+  gaussian_noise: 0.3
+  blur: 0.3
+
+# Optimization settings
+optimizer:
+  type: adam
+  betas: [0.9, 0.999]
+
+scheduler:
+  type: reduce_on_plateau
+  factor: 0.5
+  patience: 5
+  min_lr: 0.00001
+
+# Gradient settings
+gradient_clip: 1.0
+
+# Logging
+tensorboard: true
+log_frequency: 10  # Log every N batches
+
+# Device settings
+device: auto  # Options: 'auto', 'cuda', 'cpu' - 'auto' detects GPU automatically
+mixed_precision: true  # Use mixed precision training (faster on GPU, requires CUDA)
+
+# GPU-specific settings (Colab T4 compatible)
+gpu:
+  cudnn_benchmark: true  # Faster training on fixed input sizes
+  pin_memory: true  # Faster data transfer to GPU
+  num_workers: 2  # Optimal for Colab T4
