@@ -12,7 +12,7 @@ def generate_perturbation(
     image: torch.Tensor,
     epsilon: float = 0.05,
     device: str = 'cpu',
-    boost_strength: float = 1.5
+    boost_strength: float = 2.0
 ) -> torch.Tensor:
     """
     Generate perturbation map using the trained model.
@@ -22,7 +22,7 @@ def generate_perturbation(
         image: Input image tensor [B, C, H, W] or [C, H, W]
         epsilon: Perturbation scale
         device: Device to run on
-        boost_strength: Multiplier for stronger protection (default 1.5)
+        boost_strength: Multiplier for stronger protection (default 2.0)
     
     Returns:
         Perturbation tensor in range [-epsilon*boost_strength, epsilon*boost_strength]

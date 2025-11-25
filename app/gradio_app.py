@@ -172,11 +172,11 @@ class AntiDeepfakeApp:
                     with gr.Row():
                         epsilon_slider = gr.Slider(
                             minimum=0.01,
-                            maximum=0.2,
-                            value=0.05,
+                            maximum=0.3,
+                            value=0.15,
                             step=0.01,
                             label="Perturbation Strength (ε)",
-                            info="Higher = stronger protection. Start with 0.05, increase if needed."
+                            info="Higher = stronger protection. 0.15-0.20 recommended for diffusion models."
                         )
                     
                     with gr.Row():
