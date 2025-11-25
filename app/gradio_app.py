@@ -178,35 +178,59 @@ class AntiDeepfakeApp:
         # Step 1: Test original image
         results_text += "**Step 1:** Testing deepfake on ORIGINAL image...\n"
         df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(
-            original, prompt, strength=0.65
+            original, prompt, strength=0.5, num_steps=35
         )
         results_text += f"{status_orig}\n"
         if metrics_orig:
             results_text += f"  - MSE: {metrics_orig['mse']:.2f}\n"
-            results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n\n"
+            results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n"
+            results_text += f"  - Quality: {'Good' if metrics_orig.get('std', 0) > 30 else 'Poor'}\n\n"
         
         # Step 2: Test protected image
         results_text += "**Step 2:** Testing deepfake on PROTECTED image...\n"
         df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(
-            protected, prompt, strength=0.65
+            protected, prompt, strength=0.5, num_steps=35
         )
         results_text += f"{status_prot}\n"
         if metrics_prot:
             results_text += f"  - MSE: {metrics_prot['mse']:.2f}\n"
-            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n\n"
+            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n"
+            results_text += f"  - Quality: {'Good' if metrics_prot.get('std', 0) > 30 else 'Corrupted'}\n\n"
         
         # Step 3: Verdict
         results_text += "**Final Verdict:**\n"
-        if metrics_prot and metrics_orig:
-            if metrics_prot.get('corruption_detected') or df_protected is None:
+        
+        # First check if original generation worked
+        if df_original is None or metrics_orig.get('std', 0) < 30:
+            results_text += "⚠️ **TEST INCONCLUSIVE**\n"
+            results_text += "Original image generation failed. This could mean:\n"
+            results_text += "- Prompt is not clear enough\n"
+            results_text += "- Image quality is too low\n"
+            results_text += "Try a more specific prompt like:\n"
+            results_text += "  'person wearing sunglasses and hat'\n"
+            results_text += "  'smiling person with different hairstyle'\n"
+        elif metrics_prot and metrics_orig:
+            orig_quality = metrics_orig.get('std', 0) > 30
+            prot_quality = metrics_prot.get('std', 0) > 30
+            
+            if orig_quality and not prot_quality:
                 results_text += "🛡️ **PROTECTION WORKING!**\n"
-                results_text += "Protected image caused deepfake generation to fail/corrupt.\n"
-            elif metrics_prot['mse'] > metrics_orig['mse'] + 2000:
-                results_text += "🛡️ **PROTECTION PARTIALLY WORKING**\n"
-                results_text += f"Protected image degraded quality by {metrics_prot['mse'] - metrics_orig['mse']:.0f} MSE\n"
+                results_text += "✅ Original: High quality deepfake generated\n"
+                results_text += "❌ Protected: Generation corrupted/failed\n"
+                results_text += f"MSE difference: {metrics_prot['mse'] - metrics_orig['mse']:.0f}\n"
+            elif orig_quality and prot_quality:
+                mse_diff = metrics_prot['mse'] - metrics_orig['mse']
+                if mse_diff > 3000:
+                    results_text += "🛡️ **PROTECTION PARTIALLY WORKING**\n"
+                    results_text += f"Protected image degraded quality by {mse_diff:.0f} MSE\n"
+                    results_text += "Consider increasing epsilon to 0.20-0.25\n"
+                else:
+                    results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
+                    results_text += "Both images generated high quality deepfakes.\n"
+                    results_text += "**Action needed:** Increase epsilon to 0.20-0.30\n"
             else:
-                results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
-                results_text += f"Try increasing epsilon to 0.20-0.25 for stronger protection.\n"
+                results_text += "⚠️ **TEST INCONCLUSIVE**\n"
+                results_text += "Both generations failed - may need better prompt\n"
         
         # Create visualization
         comparison = create_comparison_visualization(
@@ -287,10 +311,10 @@ class AntiDeepfakeApp:
                 test_protected_display = gr.Image(label="Protected Image (from tab 1)", type="numpy", height=180, interactive=False)
                 
                 test_prompt = gr.Textbox(
-                    label="Deepfake Prompt",
-                    placeholder="e.g., 'wearing sunglasses in a garden', 'person with different hairstyle'",
-                    lines=2,
-                    value="wearing sunglasses in a garden"
+                    label="Deepfake Prompt (Be Specific!)",
+                    placeholder="Examples:\n• 'person wearing sunglasses and casual hat'\n• 'smiling person with short blonde hair'\n• 'person in formal suit with glasses'",
+                    lines=3,
+                    value="person wearing sunglasses and casual hat in outdoor setting"
                 )
                 
                 with gr.Row():

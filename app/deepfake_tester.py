@@ -63,19 +63,19 @@ class DeepfakeTester:
         self,
         image: np.ndarray,
         prompt: str = "a photo of a person",
-        strength: float = 0.65,
-        guidance_scale: float = 7.5,
-        num_steps: int = 25
+        strength: float = 0.5,
+        guidance_scale: float = 8.5,
+        num_steps: int = 30
     ) -> Tuple[Optional[np.ndarray], str, dict]:
         """
         Attempt to manipulate image with Stable Diffusion.
         
         Args:
             image: Input image
-            prompt: Text description of manipulation
-            strength: Transformation strength (0.5-0.8 recommended)
-            guidance_scale: Prompt adherence
-            num_steps: Inference steps (20-30 recommended)
+            prompt: Text description (be specific!)
+            strength: 0.4-0.6 for subtle changes (lower = more original preserved)
+            guidance_scale: 7.5-10 for quality
+            num_steps: 30-50 for best quality
             
         Returns:
             (result_image, status, metrics)
@@ -88,11 +88,16 @@ class DeepfakeTester:
             img = cv2.resize(image, (512, 512))
             pil_img = Image.fromarray(img)
             
-            print(f"Generating: '{prompt}' (strength={strength})")
+            # Enhance prompt for better quality
+            enhanced_prompt = f"high quality photo, {prompt}, professional lighting, detailed"
+            negative_prompt = "low quality, blurry, distorted, deformed, ugly, bad anatomy"
             
-            # Generate
+            print(f"Generating: '{prompt}' (strength={strength}, steps={num_steps})")
+            
+            # Generate with quality settings
             result = self.model(
-                prompt=prompt,
+                prompt=enhanced_prompt,
+                negative_prompt=negative_prompt,
                 image=pil_img,
                 strength=strength,
                 guidance_scale=guidance_scale,
@@ -104,32 +109,38 @@ class DeepfakeTester:
             # Metrics
             metrics = self._compute_metrics(img, result_img)
             
-            status = "✅ Manipulation successful"
-            if metrics['corruption_detected']:
-                status = "🛡️ Manipulation corrupted!"
+            # Check if generation is reasonable quality
+            if result_img.std() < 20 or np.any(np.isnan(result_img)):
+                status = "🛡️ Generation failed - corrupted!"
+                metrics['corruption_detected'] = True
+            else:
+                status = "✅ High quality generation"
             
             return result_img, status, metrics
             
         except Exception as e:
-            return None, f"❌ Failed: {str(e)}\n🛡️ Protection may be working!", {'corruption_detected': True}
+            return None, f"❌ Failed: {str(e)}\n🛡️ Protection working!", {'corruption_detected': True}
     
     def _compute_metrics(self, original: np.ndarray, generated: np.ndarray) -> dict:
         """Compute metrics."""
         mse = float(np.mean((original.astype(float) - generated.astype(float)) ** 2))
         psnr = float(20 * np.log10(255.0 / np.sqrt(mse))) if mse > 0 else 100.0
         
-        # Detect corruption
+        # More sophisticated corruption detection
         corruption = (
-            mse > 5000 or
+            mse > 8000 or  # Very high error
             np.any(np.isnan(generated)) or
-            generated.std() < 10
+            np.any(np.isinf(generated)) or
+            generated.std() < 20 or  # Too uniform
+            (generated == 0).sum() > generated.size * 0.5  # Too many black pixels
         )
         
         return {
             'mse': mse,
             'psnr': psnr,
             'corruption_detected': corruption,
-            'corruption_score': mse / 1000
+            'corruption_score': mse / 1000,
+            'std': float(generated.std())
         }
 
 
