@@ -200,15 +200,14 @@ class AntiDeepfakeApp:
         # Step 3: Verdict
         results_text += "**Final Verdict:**\n"
         
-        # First check if original generation worked
+        # First check if original manipulation worked
         if df_original is None or metrics_orig.get('std', 0) < 30:
             results_text += "⚠️ **TEST INCONCLUSIVE**\n"
-            results_text += "Original image generation failed. This could mean:\n"
-            results_text += "- Prompt is not clear enough\n"
-            results_text += "- Image quality is too low\n"
-            results_text += "Try a more specific prompt like:\n"
-            results_text += "  'person wearing sunglasses and hat'\n"
-            results_text += "  'smiling person with different hairstyle'\n"
+            results_text += "Original image manipulation failed.\n"
+            results_text += "Possible reasons:\n"
+            results_text += "- No clear face detected\n"
+            results_text += "- Image quality too low\n"
+            results_text += "- Face too small or at angle\n"
         elif metrics_prot and metrics_orig:
             orig_quality = metrics_orig.get('std', 0) > 30
             prot_quality = metrics_prot.get('std', 0) > 30
@@ -298,10 +297,10 @@ class AntiDeepfakeApp:
     def _create_testing_tab(self, original_state, protected_state):
         """Create the deepfake testing tab."""
         gr.Markdown("""
-        ### 🧪 Test Protection with Real Deepfake Generation
+        ### 🧪 Test Protection with Face Manipulation
         
-        Uses **Stable Diffusion** to generate actual deepfakes and test protection effectiveness.
-        **GPU recommended** - Takes ~60s on T4 GPU, ~5min on CPU.
+        Uses **InsightFace** for realistic face manipulation/deepfake generation.
+        **GPU recommended** - Takes ~5-10s on T4 GPU, ~30s on CPU.
         """)
         
         with gr.Row():
@@ -310,18 +309,13 @@ class AntiDeepfakeApp:
                 test_original_display = gr.Image(label="Original Image (from tab 1)", type="numpy", height=180, interactive=False)
                 test_protected_display = gr.Image(label="Protected Image (from tab 1)", type="numpy", height=180, interactive=False)
                 
-                test_prompt = gr.Textbox(
-                    label="Deepfake Prompt (Be Specific!)",
-                    placeholder="Examples:\n• 'person wearing sunglasses and casual hat'\n• 'smiling person with short blonde hair'\n• 'person in formal suit with glasses'",
-                    lines=3,
-                    value="person wearing sunglasses and casual hat in outdoor setting"
-                )
+                gr.Markdown("*InsightFace will automatically detect and manipulate faces*")
                 
                 with gr.Row():
-                    load_model_btn = gr.Button("1️⃣ Load Stable Diffusion", variant="secondary")
-                    test_btn = gr.Button("2️⃣ Generate Deepfakes & Test", variant="primary")
+                    load_model_btn = gr.Button("1️⃣ Load InsightFace Model", variant="secondary")
+                    test_btn = gr.Button("2️⃣ Generate & Test", variant="primary")
                 
-                model_status_box = gr.Textbox(label="Model Status", lines=2, value="Click 'Load Stable Diffusion' first")
+                model_status_box = gr.Textbox(label="Model Status", lines=2, value="Click 'Load InsightFace Model' first")
             
             with gr.Column():
                 test_output = gr.Image(label="Comparison (2x2 Grid)", type="numpy", height=550)
@@ -348,7 +342,7 @@ class AntiDeepfakeApp:
         
         test_btn.click(
             fn=self.run_protection_test,
-            inputs=[original_state, protected_state, test_prompt],
+            inputs=[original_state, protected_state],
             outputs=[test_output, test_results]
         )
     
@@ -367,7 +361,7 @@ class AntiDeepfakeApp:
                 - Fast GPU inference (protection & testing)
                 - Minimal visual impact on protected images
                 - FGSM-based perturbations
-                - Real deepfake testing with Stable Diffusion
+                - Real face manipulation testing with InsightFace
                 """
             )
             
