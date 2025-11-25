@@ -22,6 +22,11 @@ matplotlib>=3.7.0
 # Web interface
 gradio>=4.0.0
 
+# Deepfake testing (optional - for protection verification)
+diffusers>=0.25.0
+transformers>=4.35.0
+accelerate>=0.25.0
+
 # Export formats
 onnx>=1.14.0
 onnxruntime>=1.15.0

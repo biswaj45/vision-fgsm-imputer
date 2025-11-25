@@ -14,6 +14,7 @@ import cv2
 import torch
 import sys
 from pathlib import Path
+from typing import Tuple, Optional
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -27,6 +28,7 @@ from demo_utils import (
     add_protection_badge,
     Timer
 )
+from app.deepfake_tester import DeepfakeTester, create_comparison_visualization
 
 
 class AntiDeepfakeApp:
@@ -52,6 +54,7 @@ class AntiDeepfakeApp:
         self.model_type = model_type
         self.epsilon = epsilon
         self.imputer = None
+        self.deepfake_tester = None
         
         # Load model if path provided
         if model_path and Path(model_path).exists():
@@ -158,62 +161,235 @@ class AntiDeepfakeApp:
                 - Fast CPU inference (<400ms target)
                 - Minimal visual impact
                 - FGSM-based perturbations
+                - Built-in deepfake testing to verify protection
                 """
             )
             
-            with gr.Row():
-                with gr.Column():
-                    input_image = gr.Image(
-                        label="Upload Image",
-                        type="numpy",
-                        height=400
-                    )
-                    
-                    with gr.Row():
-                        epsilon_slider = gr.Slider(
-                            minimum=0.01,
-                            maximum=0.3,
-                            value=0.15,
-                            step=0.01,
-                            label="Perturbation Strength (ε)",
-                            info="Higher = stronger protection. 0.15-0.20 recommended for diffusion models."
-                        )
-                    
-                    with gr.Row():
-                        show_heatmap = gr.Checkbox(
-                            label="Show Comparison View (Original | Protected | Difference)",
-                            value=False,
-                            info="Uncheck to show only the protected image"
-                        )
-                        add_badge = gr.Checkbox(
-                            label="Add Protection Badge",
-                            value=False
-                        )
-                    
-                    process_btn = gr.Button("🛡️ Protect Image", variant="primary", size="lg")
+            with gr.Tabs():
+                # Tab 1: Protection
+                with gr.Tab("🛡️ Protect Images"):
+                    self._create_protection_tab()
                 
-                with gr.Column():
-                    output_image = gr.Image(
-                        label="Result",
-                        type="numpy",
-                        height=400
-                    )
-                    info_output = gr.Textbox(
-                        label="Processing Info",
-                        lines=10,
-                        max_lines=15
-                    )
+                # Tab 2: Test Protection
+                with gr.Tab("🧪 Test Protection"):
+                    self._create_testing_tab()
             
-            # Examples
-            gr.Markdown("### 📸 Example Images")
-            gr.Markdown("Upload your own images to test the protection.")
+            # Model info footer
+            model_status = "✓ Model loaded" if self.imputer else "⚠ Demo mode (no model)"
+            device_info = self.imputer.device.upper() if self.imputer else "CPU"
             
-            # Process button click
-            process_btn.click(
-                fn=self.process_image,
-                inputs=[input_image, epsilon_slider, show_heatmap, add_badge],
-                outputs=[output_image, info_output]
+            gr.Markdown(
+                f"""
+                ---
+                **Model Status:** {model_status} | **Model Type:** {self.model_type} | **Device:** {device_info}
+                
+                *Train on GPU (Colab T4) • Fast CPU inference for deployment (<400ms)*
+                """
             )
+        
+        return demo
+    
+    def _create_protection_tab(self):
+        """Create the image protection tab."""
+        with gr.Row():
+            with gr.Column():
+                input_image = gr.Image(
+                    label="Upload Image",
+                    type="numpy",
+                    height=400
+                )
+                
+                with gr.Row():
+                    epsilon_slider = gr.Slider(
+                        minimum=0.01,
+                        maximum=0.3,
+                        value=0.15,
+                        step=0.01,
+                        label="Perturbation Strength (ε)",
+                        info="Higher = stronger protection. 0.15-0.20 recommended for diffusion models."
+                    )
+                
+                with gr.Row():
+                    show_heatmap = gr.Checkbox(
+                        label="Show Comparison View (Original | Protected | Difference)",
+                        value=False,
+                        info="Uncheck to show only the protected image"
+                    )
+                    add_badge = gr.Checkbox(
+                        label="Add Protection Badge",
+                        value=False
+                    )
+                
+                process_btn = gr.Button("🛡️ Protect Image", variant="primary", size="lg")
+            
+            with gr.Column():
+                output_image = gr.Image(
+                    label="Result",
+                    type="numpy",
+                    height=400
+                )
+                info_output = gr.Textbox(
+                    label="Processing Info",
+                    lines=10,
+                    max_lines=15
+                )
+        
+        # Examples
+        gr.Markdown("### 📸 Example Images")
+        gr.Markdown("Upload your own images to test the protection.")
+        
+        # Process button click
+        process_btn.click(
+            fn=self.process_image,
+            inputs=[input_image, epsilon_slider, show_heatmap, add_badge],
+            outputs=[output_image, info_output]
+        )
+    
+    def _create_testing_tab(self):
+        """Create the deepfake testing tab."""
+        gr.Markdown("""
+        ### 🧪 Test Protection Effectiveness
+        
+        This section attempts to generate deepfakes from both original and protected images.
+        A successful protection will show corrupted/failed generation from the protected image.
+        """)
+        
+        with gr.Row():
+            with gr.Column():
+                test_input = gr.Image(label="Upload Original Image", type="numpy", height=300)
+                test_prompt = gr.Textbox(
+                    label="Manipulation Prompt",
+                    placeholder="e.g., 'wearing sunglasses in a garden', 'smiling with different hair'",
+                    lines=2
+                )
+                test_epsilon = gr.Slider(0.05, 0.3, value=0.15, step=0.01, label="Protection Strength")
+                
+                with gr.Row():
+                    load_model_btn = gr.Button("1️⃣ Load Deepfake Model", variant="secondary")
+                    test_btn = gr.Button("2️⃣ Run Test", variant="primary")
+                
+                model_status_box = gr.Textbox(label="Model Status", lines=2)
+            
+            with gr.Column():
+                test_output = gr.Image(label="Comparison (2x2 Grid)", type="numpy", height=600)
+                test_results = gr.Textbox(label="Test Results", lines=15)
+        
+        # Event handlers
+        load_model_btn.click(
+            fn=self.load_deepfake_model,
+            inputs=[],
+            outputs=[model_status_box]
+        )
+        
+        test_btn.click(
+            fn=self.run_protection_test,
+            inputs=[test_input, test_prompt, test_epsilon],
+            outputs=[test_output, test_results]
+        )
+    
+    def load_deepfake_model(self) -> str:
+        """Load the deepfake testing model."""
+        if self.deepfake_tester is None:
+            self.deepfake_tester = DeepfakeTester(device='cpu')
+        
+        success, msg = self.deepfake_tester.load_model()
+        return f"{'✅' if success else '❌'} {msg}"
+    
+    def run_protection_test(
+        self,
+        image: np.ndarray,
+        prompt: str,
+        epsilon: float
+    ) -> Tuple[np.ndarray, str]:
+        """Run complete protection test."""
+        if image is None:
+            return None, "❌ Please upload an image first"
+        
+        if not prompt.strip():
+            return None, "❌ Please enter a manipulation prompt"
+        
+        if self.deepfake_tester is None or not self.deepfake_tester.model_loaded:
+            return None, "❌ Please load the deepfake model first (click '1️⃣ Load Deepfake Model')"
+        
+        results_text = "🧪 **Protection Test Results**\n\n"
+        
+        # Step 1: Create protected version
+        results_text += "**Step 1:** Applying protection...\n"
+        if self.imputer is not None:
+            protected = self.imputer.impute_from_array(image, epsilon=epsilon)
+        else:
+            noise = np.random.randn(*image.shape) * (epsilon * 255)
+            protected = np.clip(image.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+        results_text += "✅ Protection applied\n\n"
+        
+        # Step 2: Test original image
+        results_text += "**Step 2:** Testing deepfake on ORIGINAL image...\n"
+        df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(
+            image, prompt, strength=0.75
+        )
+        results_text += f"{status_orig}\n"
+        if metrics_orig:
+            results_text += f"  - MSE: {metrics_orig['mse']:.2f}\n"
+            results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n"
+            results_text += f"  - SSIM: {metrics_orig['ssim']:.3f}\n\n"
+        
+        # Step 3: Test protected image
+        results_text += "**Step 3:** Testing deepfake on PROTECTED image...\n"
+        df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(
+            protected, prompt, strength=0.75
+        )
+        results_text += f"{status_prot}\n"
+        if metrics_prot:
+            results_text += f"  - MSE: {metrics_prot['mse']:.2f}\n"
+            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n"
+            results_text += f"  - SSIM: {metrics_prot['ssim']:.3f}\n\n"
+        
+        # Step 4: Verdict
+        results_text += "**Final Verdict:**\n"
+        if metrics_prot and metrics_orig:
+            corruption_increase = metrics_prot['mse'] - metrics_orig['mse']
+            if corruption_increase > 2000:
+                results_text += "🛡️ **PROTECTION WORKING!**\n"
+                results_text += f"Protected image caused {corruption_increase:.0f} more corruption\n"
+                results_text += "The deepfake model failed on the protected image.\n"
+            else:
+                results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
+                results_text += f"Increase epsilon to 0.20-0.25 for stronger protection.\n"
+        
+        # Create visualization
+        comparison = create_comparison_visualization(
+            image, protected, df_original, df_protected
+        )
+        
+        return comparison, results_text
+    
+    def create_interface(self) -> gr.Blocks:
+        """Create Gradio interface."""
+        
+        with gr.Blocks(title="Anti-Deepfake Protection", theme=gr.themes.Soft()) as demo:
+            gr.Markdown(
+                """
+                # 🛡️ Anti-Deepfake Image Protection
+                
+                Upload an image to add invisible perturbations that protect against deepfake manipulation.
+                The perturbations are imperceptible to humans but can disrupt AI-based face manipulation.
+                
+                **Features:**
+                - Fast CPU inference (<400ms target)
+                - Minimal visual impact
+                - FGSM-based perturbations
+                - Built-in deepfake testing to verify protection
+                """
+            )
+            
+            with gr.Tabs():
+                # Tab 1: Protection
+                with gr.Tab("🛡️ Protect Images"):
+                    self._create_protection_tab()
+                
+                # Tab 2: Test Protection
+                with gr.Tab("🧪 Test Protection"):
+                    self._create_testing_tab()
             
             # Model info footer
             model_status = "✓ Model loaded" if self.imputer else "⚠ Demo mode (no model)"
