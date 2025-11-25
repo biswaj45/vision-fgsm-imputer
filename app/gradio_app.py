@@ -156,6 +156,56 @@ class AntiDeepfakeApp:
         success, msg = self.deepfake_tester.load_model()
         return f"{'✅' if success else '❌'} {msg}"
     
+    def run_protection_test(
+        self,
+        original: np.ndarray,
+        protected: np.ndarray
+    ) -> Tuple[np.ndarray, str]:
+        """Run complete protection test."""
+        if original is None or protected is None:
+            return None, "❌ Please protect an image in the first tab before testing"
+        
+        if self.deepfake_tester is None or not self.deepfake_tester.model_loaded:
+            return None, "❌ Please load the test model first (click '1️⃣ Load Test Model')"
+        
+        results_text = "🧪 **Protection Test Results**\n\n"
+        
+        # Step 1: Test original image
+        results_text += "**Step 1:** Testing manipulation on ORIGINAL image...\n"
+        df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(original)
+        results_text += f"{status_orig}\n"
+        if metrics_orig:
+            results_text += f"  - MSE: {metrics_orig['mse']:.2f}\n"
+            results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n\n"
+        
+        # Step 2: Test protected image
+        results_text += "**Step 2:** Testing manipulation on PROTECTED image...\n"
+        df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(protected)
+        results_text += f"{status_prot}\n"
+        if metrics_prot:
+            results_text += f"  - MSE: {metrics_prot['mse']:.2f}\n"
+            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n\n"
+        
+        # Step 3: Verdict
+        results_text += "**Final Verdict:**\n"
+        if metrics_prot and metrics_orig:
+            if metrics_prot.get('corruption_detected') or df_protected is None:
+                results_text += "🛡️ **PROTECTION WORKING!**\n"
+                results_text += "Protected image caused manipulation to fail/corrupt.\n"
+            elif metrics_prot['mse'] > metrics_orig['mse'] + 1000:
+                results_text += "🛡️ **PROTECTION PARTIALLY WORKING**\n"
+                results_text += f"Protected image caused {metrics_prot['mse'] - metrics_orig['mse']:.0f} more corruption\n"
+            else:
+                results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
+                results_text += f"Try increasing epsilon to 0.20-0.25 for stronger protection.\n"
+        
+        # Create visualization
+        comparison = create_comparison_visualization(
+            original, protected, df_original, df_protected
+        )
+        
+        return comparison, results_text
+    
     def _create_protection_tab(self, original_state, protected_state):
         """Create the image protection tab."""
         with gr.Row():
