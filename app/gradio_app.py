@@ -159,26 +159,22 @@ class AntiDeepfakeApp:
     def run_protection_test(
         self,
         original: np.ndarray,
-        protected: np.ndarray,
-        prompt: str
+        protected: np.ndarray
     ) -> Tuple[np.ndarray, str]:
         """Run complete protection test."""
         if original is None or protected is None:
             return None, "❌ Please protect an image in the first tab before testing"
         
-        if not prompt or not prompt.strip():
-            return None, "❌ Please enter a manipulation prompt (e.g., 'wearing sunglasses in garden')"
-        
         if self.deepfake_tester is None or not self.deepfake_tester.model_loaded:
-            return None, "❌ Please load the test model first (click '1️⃣ Load Test Model')"
+            return None, "❌ Please load InsightFace model first (click '1️⃣ Load InsightFace Model')"
         
         results_text = "🧪 **Protection Test Results**\n\n"
-        results_text += f"**Prompt:** \"{prompt}\"\n\n"
+        results_text += "**Method:** InsightFace-based face manipulation\n\n"
         
         # Step 1: Test original image
-        results_text += "**Step 1:** Testing deepfake on ORIGINAL image...\n"
+        results_text += "**Step 1:** Manipulating ORIGINAL image...\n"
         df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(
-            original, prompt, strength=0.5, num_steps=35
+            original, strength=0.7
         )
         results_text += f"{status_orig}\n"
         if metrics_orig:
@@ -186,10 +182,10 @@ class AntiDeepfakeApp:
             results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n"
             results_text += f"  - Quality: {'Good' if metrics_orig.get('std', 0) > 30 else 'Poor'}\n\n"
         
-        # Step 2: Test protected image
-        results_text += "**Step 2:** Testing deepfake on PROTECTED image...\n"
+        # Step 2: Test protected image  
+        results_text += "**Step 2:** Manipulating PROTECTED image...\n"
         df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(
-            protected, prompt, strength=0.5, num_steps=35
+            protected, strength=0.7
         )
         results_text += f"{status_prot}\n"
         if metrics_prot:
