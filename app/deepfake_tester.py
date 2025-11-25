@@ -1,6 +1,6 @@
 """
 Deepfake testing module to verify protection effectiveness.
-Uses a simple CNN-based face manipulation as a lightweight alternative.
+Uses Stable Diffusion for real deepfake generation testing.
 """
 
 import torch
@@ -10,138 +10,126 @@ from PIL import Image
 import cv2
 from typing import Optional, Tuple
 
-
-class SimpleFaceManipulator(nn.Module):
-    """Lightweight CNN for face manipulation testing."""
-    
-    def __init__(self):
-        super().__init__()
-        
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3, padding=1),
-            nn.ReLU(),
-        )
-        
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.Conv2d(128, 64, 3, padding=1),
-            nn.ReLU(),
-            nn.Upsample(scale_factor=2, mode='bilinear'),
-            nn.Conv2d(64, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.Upsample(scale_factor=2, mode='bilinear'),
-            nn.Conv2d(32, 3, 3, padding=1),
-            nn.Tanh()
-        )
-    
-    def forward(self, x):
-        feat = self.encoder(x)
-        out = self.decoder(feat)
-        return out
+try:
+    from diffusers import StableDiffusionImg2ImgPipeline
+    DIFFUSERS_AVAILABLE = True
+except ImportError:
+    DIFFUSERS_AVAILABLE = False
 
 
 class DeepfakeTester:
-    """Test anti-deepfake protection with lightweight face manipulation."""
+    """Test anti-deepfake protection with Stable Diffusion."""
     
-    def __init__(self, device: str = 'cpu'):
-        self.device = device
+    def __init__(self, device: str = 'auto'):
+        """Initialize with auto device detection."""
+        if device == 'auto':
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
         self.model = None
         self.model_loaded = False
         
-    def load_model(self):
-        """Load lightweight face manipulation model."""
+    def load_model(self, model_name: str = "runwayml/stable-diffusion-v1-5"):
+        """Load Stable Diffusion model."""
+        if not DIFFUSERS_AVAILABLE:
+            return False, "❌ diffusers not installed. Run: pip install diffusers transformers accelerate"
+        
         try:
-            print("Loading lightweight face manipulator...")
-            self.model = SimpleFaceManipulator().to(self.device)
+            print(f"Loading Stable Diffusion on {self.device.upper()}...")
             
-            # Initialize with random weights (simulates a pre-trained model)
-            # In practice, this would be a real face manipulation model
-            self.model.eval()
+            # Use float16 on GPU for faster inference
+            dtype = torch.float16 if self.device == 'cuda' else torch.float32
+            
+            self.model = StableDiffusionImg2ImgPipeline.from_pretrained(
+                model_name,
+                torch_dtype=dtype,
+                safety_checker=None,
+                requires_safety_checker=False
+            ).to(self.device)
+            
+            # Optimizations
+            if self.device == 'cuda':
+                self.model.enable_attention_slicing()
+                self.model.enable_vae_slicing()
+            else:
+                self.model.enable_attention_slicing()
             
             self.model_loaded = True
-            return True, "✅ Lightweight model loaded (< 5 seconds)"
+            return True, f"✅ Model loaded on {self.device.upper()}"
         except Exception as e:
-            return False, f"Failed to load model: {str(e)}"
+            return False, f"❌ Failed: {str(e)}"
     
     def test_manipulation(
         self,
         image: np.ndarray,
-        prompt: str = "",
-        strength: float = 0.75,
-        guidance_scale: float = 7.5
+        prompt: str = "a photo of a person",
+        strength: float = 0.65,
+        guidance_scale: float = 7.5,
+        num_steps: int = 25
     ) -> Tuple[Optional[np.ndarray], str, dict]:
         """
-        Attempt to manipulate image.
+        Attempt to manipulate image with Stable Diffusion.
         
         Args:
-            image: Input image (protected or unprotected)
-            prompt: Manipulation description (unused in lightweight version)
-            strength: How much to transform
-            guidance_scale: Not used
+            image: Input image
+            prompt: Text description of manipulation
+            strength: Transformation strength (0.5-0.8 recommended)
+            guidance_scale: Prompt adherence
+            num_steps: Inference steps (20-30 recommended)
             
         Returns:
-            (result_image, status_message, metrics)
+            (result_image, status, metrics)
         """
         if not self.model_loaded:
-            return None, "Model not loaded. Click 'Load Model' first.", {}
+            return None, "❌ Model not loaded", {}
         
         try:
-            # Resize and normalize
-            img = cv2.resize(image, (256, 256))
-            img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 127.5 - 1.0
-            img_tensor = img_tensor.unsqueeze(0).to(self.device)
+            # Resize and convert
+            img = cv2.resize(image, (512, 512))
+            pil_img = Image.fromarray(img)
             
-            # Generate manipulation
-            with torch.no_grad():
-                manipulated = self.model(img_tensor)
-                
-                # Blend with original based on strength
-                result = img_tensor * (1 - strength) + manipulated * strength
+            print(f"Generating: '{prompt}' (strength={strength})")
             
-            # Convert back
-            result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy()
-            result_np = ((result_np + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+            # Generate
+            result = self.model(
+                prompt=prompt,
+                image=pil_img,
+                strength=strength,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_steps
+            )
             
-            # Compute metrics
-            metrics = self._compute_metrics(img, result_np)
+            result_img = np.array(result.images[0])
+            
+            # Metrics
+            metrics = self._compute_metrics(img, result_img)
             
             status = "✅ Manipulation successful"
-            if metrics['mse'] > 2000 or metrics['corruption_detected']:
-                status = "🛡️ Manipulation corrupted - Protection working!"
+            if metrics['corruption_detected']:
+                status = "🛡️ Manipulation corrupted!"
             
-            return result_np, status, metrics
+            return result_img, status, metrics
             
         except Exception as e:
-            return None, f"❌ Generation failed: {str(e)}\n🛡️ This could mean protection is working!", {'corruption_detected': True}
+            return None, f"❌ Failed: {str(e)}\n🛡️ Protection may be working!", {'corruption_detected': True}
     
     def _compute_metrics(self, original: np.ndarray, generated: np.ndarray) -> dict:
-        """Compute quality metrics."""
-        mse = np.mean((original.astype(float) - generated.astype(float)) ** 2)
+        """Compute metrics."""
+        mse = float(np.mean((original.astype(float) - generated.astype(float)) ** 2))
+        psnr = float(20 * np.log10(255.0 / np.sqrt(mse))) if mse > 0 else 100.0
         
-        if mse > 0:
-            psnr = 20 * np.log10(255.0 / np.sqrt(mse))
-        else:
-            psnr = 100
-        
-        # Simple corruption detection
-        corruption_detected = (
-            mse > 3000 or  # High MSE
-            np.any(np.isnan(generated)) or  # NaN values
-            generated.std() < 10  # Too uniform (failed)
+        # Detect corruption
+        corruption = (
+            mse > 5000 or
+            np.any(np.isnan(generated)) or
+            generated.std() < 10
         )
         
         return {
-            'mse': float(mse),
-            'psnr': float(psnr),
-            'corruption_detected': bool(corruption_detected),
-            'corruption_score': float(mse / 1000)
+            'mse': mse,
+            'psnr': psnr,
+            'corruption_detected': corruption,
+            'corruption_score': mse / 1000
         }
 
 

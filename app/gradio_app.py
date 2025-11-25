@@ -39,7 +39,7 @@ class AntiDeepfakeApp:
         model_path: str = None,
         model_type: str = 'unet',
         epsilon: float = 0.02,
-        force_cpu: bool = True
+        force_cpu: bool = False
     ):
         """
         Initialize app.
@@ -48,7 +48,7 @@ class AntiDeepfakeApp:
             model_path: Path to trained model
             model_type: Model type ('unet' or 'autoencoder')
             epsilon: Perturbation magnitude
-            force_cpu: Force CPU inference for demo (True by default for deployment)
+            force_cpu: Force CPU inference (False = auto-detect GPU)
         """
         self.model_path = model_path
         self.model_type = model_type
@@ -151,7 +151,7 @@ class AntiDeepfakeApp:
     def load_deepfake_model(self) -> str:
         """Load the deepfake testing model."""
         if self.deepfake_tester is None:
-            self.deepfake_tester = DeepfakeTester(device='cpu')
+            self.deepfake_tester = DeepfakeTester(device='auto')  # Auto-detect GPU
         
         success, msg = self.deepfake_tester.load_model()
         return f"{'✅' if success else '❌'} {msg}"
@@ -159,28 +159,37 @@ class AntiDeepfakeApp:
     def run_protection_test(
         self,
         original: np.ndarray,
-        protected: np.ndarray
+        protected: np.ndarray,
+        prompt: str
     ) -> Tuple[np.ndarray, str]:
         """Run complete protection test."""
         if original is None or protected is None:
             return None, "❌ Please protect an image in the first tab before testing"
         
+        if not prompt or not prompt.strip():
+            return None, "❌ Please enter a manipulation prompt (e.g., 'wearing sunglasses in garden')"
+        
         if self.deepfake_tester is None or not self.deepfake_tester.model_loaded:
             return None, "❌ Please load the test model first (click '1️⃣ Load Test Model')"
         
         results_text = "🧪 **Protection Test Results**\n\n"
+        results_text += f"**Prompt:** \"{prompt}\"\n\n"
         
         # Step 1: Test original image
-        results_text += "**Step 1:** Testing manipulation on ORIGINAL image...\n"
-        df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(original)
+        results_text += "**Step 1:** Testing deepfake on ORIGINAL image...\n"
+        df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(
+            original, prompt, strength=0.65
+        )
         results_text += f"{status_orig}\n"
         if metrics_orig:
             results_text += f"  - MSE: {metrics_orig['mse']:.2f}\n"
             results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n\n"
         
         # Step 2: Test protected image
-        results_text += "**Step 2:** Testing manipulation on PROTECTED image...\n"
-        df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(protected)
+        results_text += "**Step 2:** Testing deepfake on PROTECTED image...\n"
+        df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(
+            protected, prompt, strength=0.65
+        )
         results_text += f"{status_prot}\n"
         if metrics_prot:
             results_text += f"  - MSE: {metrics_prot['mse']:.2f}\n"
@@ -191,10 +200,10 @@ class AntiDeepfakeApp:
         if metrics_prot and metrics_orig:
             if metrics_prot.get('corruption_detected') or df_protected is None:
                 results_text += "🛡️ **PROTECTION WORKING!**\n"
-                results_text += "Protected image caused manipulation to fail/corrupt.\n"
-            elif metrics_prot['mse'] > metrics_orig['mse'] + 1000:
+                results_text += "Protected image caused deepfake generation to fail/corrupt.\n"
+            elif metrics_prot['mse'] > metrics_orig['mse'] + 2000:
                 results_text += "🛡️ **PROTECTION PARTIALLY WORKING**\n"
-                results_text += f"Protected image caused {metrics_prot['mse'] - metrics_orig['mse']:.0f} more corruption\n"
+                results_text += f"Protected image degraded quality by {metrics_prot['mse'] - metrics_orig['mse']:.0f} MSE\n"
             else:
                 results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
                 results_text += f"Try increasing epsilon to 0.20-0.25 for stronger protection.\n"
@@ -265,27 +274,34 @@ class AntiDeepfakeApp:
     def _create_testing_tab(self, original_state, protected_state):
         """Create the deepfake testing tab."""
         gr.Markdown("""
-        ### 🧪 Test Protection Effectiveness
+        ### 🧪 Test Protection with Real Deepfake Generation
         
-        This section attempts simple face manipulation on both original and protected images.
-        **Fast lightweight testing** - loads in <5 seconds, runs in <10 seconds.
+        Uses **Stable Diffusion** to generate actual deepfakes and test protection effectiveness.
+        **GPU recommended** - Takes ~60s on T4 GPU, ~5min on CPU.
         """)
         
         with gr.Row():
             with gr.Column():
                 gr.Markdown("**Images auto-populated from Protection tab**")
-                test_original_display = gr.Image(label="Original Image (from tab 1)", type="numpy", height=200, interactive=False)
-                test_protected_display = gr.Image(label="Protected Image (from tab 1)", type="numpy", height=200, interactive=False)
+                test_original_display = gr.Image(label="Original Image (from tab 1)", type="numpy", height=180, interactive=False)
+                test_protected_display = gr.Image(label="Protected Image (from tab 1)", type="numpy", height=180, interactive=False)
+                
+                test_prompt = gr.Textbox(
+                    label="Deepfake Prompt",
+                    placeholder="e.g., 'wearing sunglasses in a garden', 'person with different hairstyle'",
+                    lines=2,
+                    value="wearing sunglasses in a garden"
+                )
                 
                 with gr.Row():
-                    load_model_btn = gr.Button("1️⃣ Load Test Model", variant="secondary", size="sm")
-                    test_btn = gr.Button("2️⃣ Run Manipulation Test", variant="primary", size="lg")
+                    load_model_btn = gr.Button("1️⃣ Load Stable Diffusion", variant="secondary")
+                    test_btn = gr.Button("2️⃣ Generate Deepfakes & Test", variant="primary")
                 
-                model_status_box = gr.Textbox(label="Model Status", lines=2, value="Click 'Load Test Model' first")
+                model_status_box = gr.Textbox(label="Model Status", lines=2, value="Click 'Load Stable Diffusion' first")
             
             with gr.Column():
                 test_output = gr.Image(label="Comparison (2x2 Grid)", type="numpy", height=550)
-                test_results = gr.Textbox(label="Test Results", lines=12)
+                test_results = gr.Textbox(label="Test Results", lines=14)
         
         # Auto-populate displays when state changes
         original_state.change(
@@ -308,7 +324,7 @@ class AntiDeepfakeApp:
         
         test_btn.click(
             fn=self.run_protection_test,
-            inputs=[original_state, protected_state],
+            inputs=[original_state, protected_state, test_prompt],
             outputs=[test_output, test_results]
         )
     
@@ -324,10 +340,10 @@ class AntiDeepfakeApp:
                 The perturbations are imperceptible to humans but can disrupt AI-based face manipulation.
                 
                 **Features:**
-                - Fast CPU inference (<400ms target)
-                - Minimal visual impact
+                - Fast GPU inference (protection & testing)
+                - Minimal visual impact on protected images
                 - FGSM-based perturbations
-                - Built-in lightweight testing (<10 seconds)
+                - Real deepfake testing with Stable Diffusion
                 """
             )
             
@@ -403,18 +419,18 @@ def main():
     parser.add_argument(
         '--gpu',
         action='store_true',
-        help='Use GPU for inference (default: CPU for fast deployment)'
+        help='Use GPU for inference (default: auto-detect)'
     )
     
     args = parser.parse_args()
     
     # Create and launch app
-    # Note: Training uses GPU (Colab T4), but demo defaults to CPU for deployment
+    # Auto-detect GPU by default for best performance
     app = AntiDeepfakeApp(
         model_path=args.model_path if Path(args.model_path).exists() else None,
         model_type=args.model_type,
         epsilon=args.epsilon,
-        force_cpu=not args.gpu  # Default to CPU for demo
+        force_cpu=False  # Auto-detect GPU
     )
     
     print("\n" + "="*60)
