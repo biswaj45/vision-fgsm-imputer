@@ -159,73 +159,83 @@ class AntiDeepfakeApp:
     def run_protection_test(
         self,
         original: np.ndarray,
-        protected: np.ndarray
+        protected: np.ndarray,
+        source_face: np.ndarray
     ) -> Tuple[np.ndarray, str]:
-        """Run complete protection test."""
+        """Run complete protection test with face swapping."""
         if original is None or protected is None:
             return None, "❌ Please protect an image in the first tab before testing"
         
+        if source_face is None:
+            return None, "❌ Please upload a source face image to swap in"
+        
         if self.deepfake_tester is None or not self.deepfake_tester.model_loaded:
-            return None, "❌ Please load InsightFace model first (click '1️⃣ Load InsightFace Model')"
+            return None, "❌ Please load Face Swapper first (click '1️⃣ Load Face Swapper')"
         
-        results_text = "🧪 **Protection Test Results**\n\n"
-        results_text += "**Method:** InsightFace-based face manipulation\n\n"
+        results_text = "🧪 **Face Swap Protection Test**\n\n"
+        results_text += "**Method:** InsightFace inswapper (real deepfake technology)\n\n"
         
-        # Step 1: Test original image
-        results_text += "**Step 1:** Manipulating ORIGINAL image...\n"
+        # Step 1: Swap face on original image
+        results_text += "**Step 1:** Swapping face on ORIGINAL image...\n"
         df_original, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(
-            original, strength=0.7
+            target_image=original,
+            source_image=source_face
         )
         results_text += f"{status_orig}\n"
         if metrics_orig:
-            results_text += f"  - MSE: {metrics_orig['mse']:.2f}\n"
+            results_text += f"  - MSE: {metrics_orig['mse']:.2f} ({metrics_orig.get('swap_strength', 'Unknown')} change)\n"
             results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n"
             results_text += f"  - Quality: {'Good' if metrics_orig.get('std', 0) > 30 else 'Poor'}\n\n"
         
-        # Step 2: Test protected image  
-        results_text += "**Step 2:** Manipulating PROTECTED image...\n"
+        # Step 2: Swap face on protected image  
+        results_text += "**Step 2:** Swapping face on PROTECTED image...\n"
         df_protected, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(
-            protected, strength=0.7
+            target_image=protected,
+            source_image=source_face
         )
         results_text += f"{status_prot}\n"
         if metrics_prot:
-            results_text += f"  - MSE: {metrics_prot['mse']:.2f}\n"
-            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n"
-            results_text += f"  - Quality: {'Good' if metrics_prot.get('std', 0) > 30 else 'Corrupted'}\n\n"
+            results_text += f"  - MSE: {metrics_prot['mse']:.2f} ({metrics_prot.get('swap_strength', 'Unknown')} change)\n"
+            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n\n"
         
         # Step 3: Verdict
         results_text += "**Final Verdict:**\n"
         
-        # First check if original manipulation worked
-        if df_original is None or metrics_orig.get('std', 0) < 30:
+        # First check if original face swap worked
+        if df_original is None or metrics_orig.get('mse', 0) < 500:
             results_text += "⚠️ **TEST INCONCLUSIVE**\n"
-            results_text += "Original image manipulation failed.\n"
+            results_text += "Face swap on original image failed or too weak.\n"
             results_text += "Possible reasons:\n"
-            results_text += "- No clear face detected\n"
-            results_text += "- Image quality too low\n"
-            results_text += "- Face too small or at angle\n"
+            results_text += "- No clear face detected in source or target\n"
+            results_text += "- Faces at extreme angles\n"
+            results_text += "- Try a different source face (frontal view)\n"
         elif metrics_prot and metrics_orig:
-            orig_quality = metrics_orig.get('std', 0) > 30
-            prot_quality = metrics_prot.get('std', 0) > 30
+            mse_original = metrics_orig['mse']
+            mse_protected = metrics_prot['mse']
             
-            if orig_quality and not prot_quality:
-                results_text += "🛡️ **PROTECTION WORKING!**\n"
-                results_text += "✅ Original: High quality deepfake generated\n"
-                results_text += "❌ Protected: Generation corrupted/failed\n"
-                results_text += f"MSE difference: {metrics_prot['mse'] - metrics_orig['mse']:.0f}\n"
-            elif orig_quality and prot_quality:
-                mse_diff = metrics_prot['mse'] - metrics_orig['mse']
-                if mse_diff > 3000:
-                    results_text += "🛡️ **PROTECTION PARTIALLY WORKING**\n"
-                    results_text += f"Protected image degraded quality by {mse_diff:.0f} MSE\n"
-                    results_text += "Consider increasing epsilon to 0.20-0.25\n"
+            # For face swap: successful swap should have MSE > 500
+            # Protected should either fail (MSE < 100) or create artifacts (MSE > 15000)
+            
+            if metrics_prot.get('corruption_detected'):
+                results_text += "✅ **PROTECTION WORKING!**\n"
+                if mse_protected < 100:
+                    results_text += f"Face swap FAILED on protected image (MSE: {mse_protected:.0f})\n"
                 else:
-                    results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
-                    results_text += "Both images generated high quality deepfakes.\n"
-                    results_text += "**Action needed:** Increase epsilon to 0.20-0.30\n"
+                    results_text += f"Face swap created heavy artifacts (MSE: {mse_protected:.0f})\n"
+                results_text += "**Result:** Protection successfully disrupted deepfake generation!\n"
+            elif mse_protected > 15000:
+                results_text += "✅ **STRONG PROTECTION**\n"
+                results_text += f"Face swap heavily corrupted (MSE: {mse_protected:.0f} vs {mse_original:.0f})\n"
+            elif mse_protected < 100:
+                results_text += "✅ **EXCELLENT PROTECTION**\n"
+                results_text += f"Face swap completely failed on protected image!\n"
+            elif mse_original > 500 and mse_protected > 500:
+                results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
+                results_text += f"Both images had successful face swaps (Original MSE: {mse_original:.0f}, Protected MSE: {mse_protected:.0f})\n"
+                results_text += "**Action needed:** Increase epsilon to 0.25-0.30\n"
             else:
                 results_text += "⚠️ **TEST INCONCLUSIVE**\n"
-                results_text += "Both generations failed - may need better prompt\n"
+                results_text += "Face swap results unclear. Try different source face.\n"
         
         # Create visualization
         comparison = create_comparison_visualization(
@@ -293,25 +303,34 @@ class AntiDeepfakeApp:
     def _create_testing_tab(self, original_state, protected_state):
         """Create the deepfake testing tab."""
         gr.Markdown("""
-        ### 🧪 Test Protection with Face Manipulation
+        ### 🧪 Test Protection with Real Face Swap
         
-        Uses **InsightFace** for realistic face manipulation/deepfake generation.
+        Uses **InsightFace inswapper** - the SAME technology used by DeepFaceLab, Roop, and FaceSwap!
+        Upload a source face → it will be swapped onto your target images.
         **GPU recommended** - Takes ~5-10s on T4 GPU, ~30s on CPU.
         """)
         
         with gr.Row():
             with gr.Column():
-                gr.Markdown("**Images auto-populated from Protection tab**")
+                gr.Markdown("**Target Images (auto-populated from Protection tab)**")
                 test_original_display = gr.Image(label="Original Image (from tab 1)", type="numpy", height=180, interactive=False)
                 test_protected_display = gr.Image(label="Protected Image (from tab 1)", type="numpy", height=180, interactive=False)
                 
-                gr.Markdown("*InsightFace will automatically detect and manipulate faces*")
+                gr.Markdown("**Source Face (upload any face to swap in)**")
+                source_face_input = gr.Image(
+                    label="Source Face Image",
+                    type="numpy",
+                    height=200,
+                    sources=["upload", "clipboard"],
+                    elem_id="source_face"
+                )
+                gr.Markdown("*💡 Tip: Use a clear frontal face photo for best results*")
                 
                 with gr.Row():
-                    load_model_btn = gr.Button("1️⃣ Load InsightFace Model", variant="secondary")
-                    test_btn = gr.Button("2️⃣ Generate & Test", variant="primary")
+                    load_model_btn = gr.Button("1️⃣ Load Face Swapper", variant="secondary")
+                    test_btn = gr.Button("2️⃣ Swap Faces & Test", variant="primary")
                 
-                model_status_box = gr.Textbox(label="Model Status", lines=2, value="Click 'Load InsightFace Model' first")
+                model_status_box = gr.Textbox(label="Model Status", lines=2, value="Click 'Load Face Swapper' first")
             
             with gr.Column():
                 test_output = gr.Image(label="Comparison (2x2 Grid)", type="numpy", height=550)
@@ -338,7 +357,7 @@ class AntiDeepfakeApp:
         
         test_btn.click(
             fn=self.run_protection_test,
-            inputs=[original_state, protected_state],
+            inputs=[original_state, protected_state, source_face_input],
             outputs=[test_output, test_results]
         )
     
@@ -357,7 +376,7 @@ class AntiDeepfakeApp:
                 - Fast GPU inference (protection & testing)
                 - Minimal visual impact on protected images
                 - FGSM-based perturbations
-                - Real face manipulation testing with InsightFace
+                - Real face swap testing with InsightFace inswapper (DeepFaceLab technology)
                 """
             )
             
