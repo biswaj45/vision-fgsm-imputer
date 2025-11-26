@@ -115,6 +115,9 @@ class DeepfakeTester:
             # Perform face swap using the swapper
             result_img = self._swap_face(target_image, target_face, source_face)
             
+            if result_img is None:
+                return None, "🛡️ Face swap FAILED - processing error!", {'corruption_detected': True}
+            
             # Compute metrics
             metrics = self._compute_metrics(target_image, result_img)
             
@@ -132,77 +135,126 @@ class DeepfakeTester:
     
     def _swap_face(self, target_img: np.ndarray, target_face, source_face) -> np.ndarray:
         """Perform face swap using ONNX model."""
-        # Prepare input
-        source_embedding = source_face.normed_embedding.reshape((1, -1))
-        source_embedding = source_embedding.astype(np.float32)
-        
-        # Get face alignment
-        target_landmark = target_face.kps
-        
-        # Create input tensor
-        input_size = (128, 128)
-        
-        # Extract and align target face region
-        M = self._estimate_norm(target_landmark, input_size)
-        aligned_img = cv2.warpAffine(target_img, M, input_size, borderValue=0.0)
-        
-        # Normalize
-        blob = cv2.dnn.blobFromImage(aligned_img, 1.0 / 255, input_size, (0, 0, 0), swapRB=True)
-        
-        # Run inference
-        latent = self.swapper.run(None, {
-            'target': blob,
-            'source': source_embedding
-        })[0]
-        
-        # Denormalize
-        swapped_face = latent[0].transpose(1, 2, 0)
-        swapped_face = np.clip(swapped_face * 255, 0, 255).astype(np.uint8)
-        swapped_face = cv2.cvtColor(swapped_face, cv2.COLOR_RGB2BGR)
-        
-        # Paste back
-        IM = cv2.invertAffineTransform(M)
-        result = target_img.copy()
-        
-        # Warp swapped face back
-        swapped_back = cv2.warpAffine(swapped_face, IM, (result.shape[1], result.shape[0]), borderValue=0.0)
-        
-        # Create mask
-        mask = np.zeros((input_size[1], input_size[0], 3), dtype=np.float32)
-        mask = cv2.ellipse(mask, (input_size[0]//2, input_size[1]//2), (input_size[0]//2-5, input_size[1]//2-10), 0, 0, 360, (1, 1, 1), -1)
-        mask = cv2.warpAffine(mask, IM, (result.shape[1], result.shape[0]))
-        mask = cv2.GaussianBlur(mask, (7, 7), 3)
-        
-        # Blend
-        result = mask * swapped_back + (1 - mask) * result
-        
-        return result.astype(np.uint8)
+        try:
+            # Get embeddings
+            source_embedding = source_face.normed_embedding.reshape((1, -1)).astype(np.float32)
+            
+            # Get face alignment landmarks
+            target_landmark = target_face.kps
+            
+            # Align and extract target face
+            input_size = (128, 128)
+            M = self._estimate_norm(target_landmark, input_size[0])
+            
+            if M is None:
+                print("Failed to estimate transformation matrix")
+                return None
+            
+            # Warp target face to aligned position
+            aligned_img = cv2.warpAffine(target_img, M, input_size, borderValue=0.0)
+            
+            # Prepare input: convert to blob (NCHW format, normalized)
+            input_blob = cv2.dnn.blobFromImage(
+                aligned_img, 
+                1.0 / 255.0,
+                input_size, 
+                (0.0, 0.0, 0.0), 
+                swapRB=True
+            )
+            
+            # Run face swap inference
+            onnx_inputs = {
+                'target': input_blob,
+                'source': source_embedding
+            }
+            onnx_output = self.swapper.run(None, onnx_inputs)[0]
+            
+            # Post-process output
+            swapped_face = onnx_output[0].transpose(1, 2, 0)  # CHW -> HWC
+            swapped_face = np.clip(swapped_face * 255, 0, 255).astype(np.uint8)
+            
+            # Convert back if needed (model outputs RGB)
+            if len(swapped_face.shape) == 3 and swapped_face.shape[2] == 3:
+                swapped_face_bgr = cv2.cvtColor(swapped_face, cv2.COLOR_RGB2BGR)
+            else:
+                swapped_face_bgr = swapped_face
+            
+            # Paste back to original image
+            IM = cv2.invertAffineTransform(M)
+            result = target_img.copy()
+            
+            # Warp swapped face back to original position
+            bgr_fake = cv2.warpAffine(swapped_face_bgr.astype(np.float32), IM, (result.shape[1], result.shape[0]), borderValue=0.0)
+            
+            # Create smooth mask
+            mask = np.zeros((input_size[1], input_size[0]), dtype=np.float32)
+            center_x, center_y = input_size[0] // 2, input_size[1] // 2
+            axes = (int(input_size[0] * 0.45), int(input_size[1] * 0.50))
+            mask = cv2.ellipse(mask, (center_x, center_y), axes, 0, 0, 360, 255, -1)
+            mask = mask / 255.0
+            
+            # Expand mask to 3 channels
+            mask_3ch = np.stack([mask, mask, mask], axis=2)
+            
+            # Warp mask back
+            mask_warped = cv2.warpAffine(mask_3ch, IM, (result.shape[1], result.shape[0]), borderValue=0.0)
+            
+            # Blur mask for smooth blending
+            mask_warped = cv2.GaussianBlur(mask_warped, (7, 7), 3)
+            
+            # Blend using mask
+            result = (mask_warped * bgr_fake + (1 - mask_warped) * result.astype(np.float32)).astype(np.uint8)
+            
+            return result
+            
+        except Exception as e:
+            print(f"Face swap error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _estimate_norm(self, lmk, image_size=112):
-        """Estimate affine transformation matrix."""
-        assert lmk.shape == (5, 2)
+        """Estimate affine transformation matrix for face alignment."""
+        assert lmk.shape == (5, 2), f"Expected shape (5, 2), got {lmk.shape}"
         
-        # Standard landmark positions
+        # Standard 5-point landmark template (FFHQ-style alignment)
         if image_size == 112:
             src = np.array([
                 [38.2946, 51.6963],
                 [73.5318, 51.5014],
                 [56.0252, 71.7366],
                 [41.5493, 92.3655],
-                [70.7299, 92.2041]], dtype=np.float32)
-        else:
+                [70.7299, 92.2041]
+            ], dtype=np.float32)
+        elif image_size == 128:
+            # Scale for 128x128
             src = np.array([
                 [38.2946, 51.6963],
                 [73.5318, 51.5014],
                 [56.0252, 71.7366],
                 [41.5493, 92.3655],
-                [70.7299, 92.2041]], dtype=np.float32)
-            src = src * image_size / 112
+                [70.7299, 92.2041]
+            ], dtype=np.float32)
+            src = src * (image_size / 112.0)
+        else:
+            # Generic scaling
+            src = np.array([
+                [38.2946, 51.6963],
+                [73.5318, 51.5014],
+                [56.0252, 71.7366],
+                [41.5493, 92.3655],
+                [70.7299, 92.2041]
+            ], dtype=np.float32)
+            src = src * (image_size / 112.0)
         
         dst = lmk.astype(np.float32)
         
-        # Estimate transform
-        tform = cv2.estimateAffinePartial2D(src, dst, method=cv2.LMEDS)[0]
+        # Estimate similarity transform (rotation + scale + translation)
+        tform = cv2.estimateAffinePartial2D(src, dst, method=cv2.RANSAC)[0]
+        
+        if tform is None:
+            # Fallback: use full affine
+            tform = cv2.getAffineTransform(src[:3], dst[:3])
         
         return tform
     
