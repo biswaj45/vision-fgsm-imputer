@@ -73,10 +73,22 @@ class AntiDeepfakeApp:
                     print("  [Demo Mode] Optimized for CPU deployment (<400ms target)")
             except Exception as e:
                 print(f"⚠ Warning: Could not load model: {e}")
-                print("Running in demo mode without trained model")
+                print("Running in LIMITED mode - protection disabled, testing only")
         else:
-            print("⚠ No model path provided or file not found")
-            print("Running in demo mode")
+            if model_path:
+                print(f"⚠ Model file not found: {model_path}")
+            else:
+                print("ℹ️  No model path provided")
+            print("\n" + "="*60)
+            print("RUNNING IN LIMITED MODE")
+            print("="*60)
+            print("• Protection tab: DISABLED (no trained model)")
+            print("• Testing tab: ENABLED (face swap testing works)")
+            print("\nTo enable full functionality, train the model first:")
+            print("  !python training/train_unet.py")
+            print("Then restart with:")
+            print("  !python app/gradio_app.py --model_path outputs/checkpoints/best.pth --share")
+            print("="*60 + "\n")
     
     def process_image(
         self,

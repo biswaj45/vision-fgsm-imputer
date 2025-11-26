@@ -70,6 +70,12 @@ class DeepfakeTester:
             print(f"Loading face swapper from {model_path}...")
             self.swapper = onnxruntime.InferenceSession(model_path, providers=providers)
             
+            # Debug: print model info
+            print(f"Model inputs: {[inp.name for inp in self.swapper.get_inputs()]}")
+            print(f"Model outputs: {[out.name for out in self.swapper.get_outputs()]}")
+            for inp in self.swapper.get_inputs():
+                print(f"  - {inp.name}: shape={inp.shape}, type={inp.type}")
+            
             self.model_loaded = True
             return True, f"✅ InsightFace Face Swapper loaded on {self.device.upper()} - Ready for realistic deepfakes!"
         except Exception as e:
@@ -138,6 +144,7 @@ class DeepfakeTester:
         try:
             # Get embeddings
             source_embedding = source_face.normed_embedding.reshape((1, -1)).astype(np.float32)
+            print(f"Source embedding shape: {source_embedding.shape}")
             
             # Get face alignment landmarks
             target_landmark = target_face.kps
@@ -152,8 +159,9 @@ class DeepfakeTester:
             
             # Warp target face to aligned position
             aligned_img = cv2.warpAffine(target_img, M, input_size, borderValue=0.0)
+            print(f"Aligned image shape: {aligned_img.shape}, dtype: {aligned_img.dtype}")
             
-            # Prepare input: convert to blob (NCHW format, normalized)
+            # Prepare input: convert to blob (NCHW format, normalized to 0-1)
             input_blob = cv2.dnn.blobFromImage(
                 aligned_img, 
                 1.0 / 255.0,
@@ -161,23 +169,35 @@ class DeepfakeTester:
                 (0.0, 0.0, 0.0), 
                 swapRB=True
             )
+            print(f"Input blob shape: {input_blob.shape}, dtype: {input_blob.dtype}, range: [{input_blob.min():.3f}, {input_blob.max():.3f}]")
+            
+            # Get actual input names from model
+            input_names = [inp.name for inp in self.swapper.get_inputs()]
+            print(f"Model expects inputs: {input_names}")
+            
+            # Build input dict based on actual model inputs
+            if len(input_names) == 2:
+                # Typical inswapper: expects 'target' and 'source'
+                onnx_inputs = {
+                    input_names[0]: input_blob,      # target face image
+                    input_names[1]: source_embedding  # source face embedding
+                }
+            else:
+                print(f"Unexpected number of inputs: {len(input_names)}")
+                return None
             
             # Run face swap inference
-            onnx_inputs = {
-                'target': input_blob,
-                'source': source_embedding
-            }
+            print("Running inference...")
             onnx_output = self.swapper.run(None, onnx_inputs)[0]
+            print(f"Output shape: {onnx_output.shape}, dtype: {onnx_output.dtype}, range: [{onnx_output.min():.3f}, {onnx_output.max():.3f}]")
             
             # Post-process output
             swapped_face = onnx_output[0].transpose(1, 2, 0)  # CHW -> HWC
             swapped_face = np.clip(swapped_face * 255, 0, 255).astype(np.uint8)
+            print(f"Swapped face shape: {swapped_face.shape}, range: [{swapped_face.min()}, {swapped_face.max()}]")
             
-            # Convert back if needed (model outputs RGB)
-            if len(swapped_face.shape) == 3 and swapped_face.shape[2] == 3:
-                swapped_face_bgr = cv2.cvtColor(swapped_face, cv2.COLOR_RGB2BGR)
-            else:
-                swapped_face_bgr = swapped_face
+            # Already in RGB from model
+            swapped_face_bgr = swapped_face
             
             # Paste back to original image
             IM = cv2.invertAffineTransform(M)
@@ -205,6 +225,7 @@ class DeepfakeTester:
             # Blend using mask
             result = (mask_warped * bgr_fake + (1 - mask_warped) * result.astype(np.float32)).astype(np.uint8)
             
+            print(f"✅ Face swap complete! Result shape: {result.shape}")
             return result
             
         except Exception as e:
