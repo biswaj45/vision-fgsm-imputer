@@ -8,12 +8,10 @@ import numpy as np
 from PIL import Image
 import cv2
 from typing import Optional, Tuple
-import os
 
 try:
     import insightface
     from insightface.app import FaceAnalysis
-    from insightface.model_zoo import get_model
     INSIGHTFACE_AVAILABLE = True
 except ImportError:
     INSIGHTFACE_AVAILABLE = False
@@ -45,12 +43,9 @@ class DeepfakeTester:
             self.app = FaceAnalysis(name='buffalo_l', providers=providers)
             self.app.prepare(ctx_id=0 if self.device == 'cuda' else -1, det_size=(640, 640))
             
-            # Load face swapper model (inswapper_128)
-            model_path = os.path.join(insightface.app.common.__path__[0], 'models/inswapper_128.onnx')
-            if not os.path.exists(model_path):
-                # Download if not exists
-                print("Downloading inswapper_128 model...")
-            self.swapper = get_model('inswapper_128.onnx', providers=providers)
+            # Load face swapper model using get_model which handles download automatically
+            print("Loading inswapper_128 model (will download if needed)...")
+            self.swapper = insightface.model_zoo.get_model('inswapper_128.onnx', providers=providers)
             
             self.model_loaded = True
             return True, f"✅ InsightFace Face Swapper loaded on {self.device.upper()} - Ready for realistic deepfakes!"
