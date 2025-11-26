@@ -157,18 +157,16 @@ class DeepfakeTester:
                 print("Failed to estimate transformation matrix")
                 return None
             
-            # Warp target face to aligned position
+            # Warp target face to aligned position - ensure RGB input
             aligned_img = cv2.warpAffine(target_img, M, input_size, borderValue=0.0)
-            print(f"Aligned image shape: {aligned_img.shape}, dtype: {aligned_img.dtype}")
+            print(f"Aligned image shape: {aligned_img.shape}, dtype: {aligned_img.dtype}, range: [{aligned_img.min()}, {aligned_img.max()}]")
             
-            # Prepare input: convert to blob (NCHW format, normalized to 0-1)
-            input_blob = cv2.dnn.blobFromImage(
-                aligned_img, 
-                1.0 / 255.0,
-                input_size, 
-                (0.0, 0.0, 0.0), 
-                swapRB=True
-            )
+            # Prepare input: normalize to [0, 1] and convert to NCHW format
+            # Gradio gives RGB, no need to swap channels
+            input_img = aligned_img.astype(np.float32) / 255.0
+            input_blob = np.transpose(input_img, (2, 0, 1))  # HWC -> CHW
+            input_blob = np.expand_dims(input_blob, axis=0)  # Add batch dimension
+            
             print(f"Input blob shape: {input_blob.shape}, dtype: {input_blob.dtype}, range: [{input_blob.min():.3f}, {input_blob.max():.3f}]")
             
             # Get actual input names from model
