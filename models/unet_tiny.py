@@ -121,9 +121,15 @@ def create_tiny_unet(pretrained_path: str = None) -> TinyUNet:
     model = TinyUNet(in_channels=3, out_channels=3)
     
     if pretrained_path:
-        state_dict = torch.load(pretrained_path, map_location='cpu')
-        model.load_state_dict(state_dict)
-        print(f"Loaded pretrained weights from {pretrained_path}")
+        checkpoint = torch.load(pretrained_path, map_location='cpu')
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # New format: checkpoint dict with model_state_dict
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"Loaded pretrained weights from {pretrained_path} (epoch {checkpoint.get('epoch', '?')})")
+        else:
+            # Old format: direct state dict
+            model.load_state_dict(checkpoint)
+            print(f"Loaded pretrained weights from {pretrained_path}")
     
     print(f"Model has {model.count_parameters():,} parameters")
     return model
