@@ -157,9 +157,31 @@ class DeepfakeTester:
                 print("Failed to estimate transformation matrix")
                 return None
             
-            # Warp target face to aligned position - ensure RGB input
-            aligned_img = cv2.warpAffine(target_img, M, input_size, borderValue=0.0)
+            # Ensure target_img is in correct format (uint8, RGB)
+            if target_img.dtype != np.uint8:
+                target_img = np.clip(target_img, 0, 255).astype(np.uint8)
+            
+            # Warp target face to aligned position
+            # Use white border instead of black to debug
+            aligned_img = cv2.warpAffine(
+                target_img, 
+                M, 
+                input_size, 
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=(0, 0, 0),
+                flags=cv2.INTER_LINEAR
+            )
+            
             print(f"Aligned image shape: {aligned_img.shape}, dtype: {aligned_img.dtype}, range: [{aligned_img.min()}, {aligned_img.max()}]")
+            
+            # Check if alignment failed (all black)
+            if aligned_img.max() == 0:
+                print(f"⚠️ WARNING: Aligned face is all black!")
+                print(f"   Transform matrix M:")
+                print(f"   {M}")
+                print(f"   Target image shape: {target_img.shape}, range: [{target_img.min()}, {target_img.max()}]")
+                print(f"   Target face bbox: {target_face.bbox}")
+                return None
             
             # Prepare input: normalize to [0, 1] and convert to NCHW format
             # Gradio gives RGB, no need to swap channels
@@ -191,6 +213,14 @@ class DeepfakeTester:
             
             # Post-process output
             swapped_face = onnx_output[0].transpose(1, 2, 0)  # CHW -> HWC
+            
+            # Check if output is valid
+            if swapped_face.max() < 0.1:
+                print(f"⚠️ WARNING: Model output is nearly black! Max value: {swapped_face.max()}")
+                print(f"   This suggests the inswapper model didn't process correctly")
+                print(f"   Input was valid: {input_blob.min():.3f} to {input_blob.max():.3f}")
+                return None
+            
             swapped_face = np.clip(swapped_face * 255, 0, 255).astype(np.uint8)
             print(f"Swapped face shape: {swapped_face.shape}, range: [{swapped_face.min()}, {swapped_face.max()}]")
             
