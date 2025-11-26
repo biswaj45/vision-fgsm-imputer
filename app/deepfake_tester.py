@@ -8,10 +8,13 @@ import numpy as np
 from PIL import Image
 import cv2
 from typing import Optional, Tuple
+import os
+import gdown
 
 try:
     import insightface
     from insightface.app import FaceAnalysis
+    import onnxruntime
     INSIGHTFACE_AVAILABLE = True
 except ImportError:
     INSIGHTFACE_AVAILABLE = False
@@ -43,14 +46,34 @@ class DeepfakeTester:
             self.app = FaceAnalysis(name='buffalo_l', providers=providers)
             self.app.prepare(ctx_id=0 if self.device == 'cuda' else -1, det_size=(640, 640))
             
-            # Load face swapper model using get_model which handles download automatically
-            print("Loading inswapper_128 model (will download if needed)...")
-            self.swapper = insightface.model_zoo.get_model('inswapper_128.onnx', providers=providers)
+            # Download inswapper model if not exists
+            model_dir = os.path.expanduser('~/.insightface/models/inswapper')
+            os.makedirs(model_dir, exist_ok=True)
+            model_path = os.path.join(model_dir, 'inswapper_128.onnx')
+            
+            if not os.path.exists(model_path):
+                print("Downloading inswapper_128 model (~554MB, one-time download)...")
+                # Google Drive link for inswapper_128.onnx
+                model_url = 'https://drive.google.com/uc?id=1krOLgjW2tAPaqV-Bw4YALz0xT5zlb5HF'
+                try:
+                    gdown.download(model_url, model_path, quiet=False)
+                    print("✅ Model downloaded successfully!")
+                except:
+                    # Fallback: try direct download from Hugging Face
+                    print("Trying alternative download source...")
+                    import urllib.request
+                    hf_url = 'https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128.onnx'
+                    urllib.request.urlretrieve(hf_url, model_path)
+                    print("✅ Model downloaded from Hugging Face!")
+            
+            # Load the model
+            print(f"Loading face swapper from {model_path}...")
+            self.swapper = onnxruntime.InferenceSession(model_path, providers=providers)
             
             self.model_loaded = True
             return True, f"✅ InsightFace Face Swapper loaded on {self.device.upper()} - Ready for realistic deepfakes!"
         except Exception as e:
-            return False, f"❌ Failed: {str(e)}"
+            return False, f"❌ Failed: {str(e)}\n\nTry manual download:\n1. Download from: https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128.onnx\n2. Place in: ~/.insightface/models/inswapper/"
     
     def test_manipulation(
         self,
@@ -89,9 +112,8 @@ class DeepfakeTester:
             source_face = source_faces[0]
             target_face = target_faces[0]
             
-            # Perform face swap
-            result_img = target_image.copy()
-            result_img = self.swapper.get(result_img, target_face, source_face, paste_back=True)
+            # Perform face swap using the swapper
+            result_img = self._swap_face(target_image, target_face, source_face)
             
             # Compute metrics
             metrics = self._compute_metrics(target_image, result_img)
@@ -107,6 +129,82 @@ class DeepfakeTester:
             
         except Exception as e:
             return None, f"❌ Face swap failed: {str(e)}\n🛡️ Protection working!", {'corruption_detected': True}
+    
+    def _swap_face(self, target_img: np.ndarray, target_face, source_face) -> np.ndarray:
+        """Perform face swap using ONNX model."""
+        # Prepare input
+        source_embedding = source_face.normed_embedding.reshape((1, -1))
+        source_embedding = source_embedding.astype(np.float32)
+        
+        # Get face alignment
+        target_landmark = target_face.kps
+        
+        # Create input tensor
+        input_size = (128, 128)
+        
+        # Extract and align target face region
+        M = self._estimate_norm(target_landmark, input_size)
+        aligned_img = cv2.warpAffine(target_img, M, input_size, borderValue=0.0)
+        
+        # Normalize
+        blob = cv2.dnn.blobFromImage(aligned_img, 1.0 / 255, input_size, (0, 0, 0), swapRB=True)
+        
+        # Run inference
+        latent = self.swapper.run(None, {
+            'target': blob,
+            'source': source_embedding
+        })[0]
+        
+        # Denormalize
+        swapped_face = latent[0].transpose(1, 2, 0)
+        swapped_face = np.clip(swapped_face * 255, 0, 255).astype(np.uint8)
+        swapped_face = cv2.cvtColor(swapped_face, cv2.COLOR_RGB2BGR)
+        
+        # Paste back
+        IM = cv2.invertAffineTransform(M)
+        result = target_img.copy()
+        
+        # Warp swapped face back
+        swapped_back = cv2.warpAffine(swapped_face, IM, (result.shape[1], result.shape[0]), borderValue=0.0)
+        
+        # Create mask
+        mask = np.zeros((input_size[1], input_size[0], 3), dtype=np.float32)
+        mask = cv2.ellipse(mask, (input_size[0]//2, input_size[1]//2), (input_size[0]//2-5, input_size[1]//2-10), 0, 0, 360, (1, 1, 1), -1)
+        mask = cv2.warpAffine(mask, IM, (result.shape[1], result.shape[0]))
+        mask = cv2.GaussianBlur(mask, (7, 7), 3)
+        
+        # Blend
+        result = mask * swapped_back + (1 - mask) * result
+        
+        return result.astype(np.uint8)
+    
+    def _estimate_norm(self, lmk, image_size=112):
+        """Estimate affine transformation matrix."""
+        assert lmk.shape == (5, 2)
+        
+        # Standard landmark positions
+        if image_size == 112:
+            src = np.array([
+                [38.2946, 51.6963],
+                [73.5318, 51.5014],
+                [56.0252, 71.7366],
+                [41.5493, 92.3655],
+                [70.7299, 92.2041]], dtype=np.float32)
+        else:
+            src = np.array([
+                [38.2946, 51.6963],
+                [73.5318, 51.5014],
+                [56.0252, 71.7366],
+                [41.5493, 92.3655],
+                [70.7299, 92.2041]], dtype=np.float32)
+            src = src * image_size / 112
+        
+        dst = lmk.astype(np.float32)
+        
+        # Estimate transform
+        tform = cv2.estimateAffinePartial2D(src, dst, method=cv2.LMEDS)[0]
+        
+        return tform
     
     def _compute_metrics(self, original: np.ndarray, generated: np.ndarray) -> dict:
         """Compute metrics."""

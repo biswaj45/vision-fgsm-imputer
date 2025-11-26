@@ -22,9 +22,10 @@ matplotlib>=3.7.0
 # Web interface
 gradio>=4.0.0
 
-# Face manipulation testing (for protection verification)
+# Face swap testing (for protection verification)
 insightface>=0.7.3
 onnxruntime-gpu>=1.16.0  # or onnxruntime for CPU only
+gdown>=4.7.1  # for model download
 
 # Export formats
 onnx>=1.14.0
