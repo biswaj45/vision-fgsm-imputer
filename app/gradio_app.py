@@ -116,7 +116,10 @@ class AntiDeepfakeApp:
             # Use model if available, otherwise use simple noise
             if self.imputer is not None:
                 try:
-                    perturbed_img = self.imputer.impute_from_array(image, epsilon=epsilon)
+                    # Update epsilon if different from initialization
+                    if epsilon != self.imputer.epsilon:
+                        self.imputer.epsilon = epsilon
+                    perturbed_img = self.imputer.impute_from_array(image)
                 except Exception as e:
                     return None, f"Error during inference: {e}", None, None
             else:
