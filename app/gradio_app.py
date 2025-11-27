@@ -163,19 +163,27 @@ class AntiDeepfakeApp:
         # Return original and protected for testing tab
         return output, info, image.copy(), perturbed_img.copy()
     
-    def load_deepfake_model(self) -> str:
+    def load_deepfake_model(self, model_choice: str) -> str:
         """Load the deepfake testing model."""
-        if self.deepfake_tester is None:
-            self.deepfake_tester = DeepfakeTester(device='auto')  # Auto-detect GPU
-        
-        success, msg = self.deepfake_tester.load_model()
-        return f"{'✅' if success else '❌'} {msg}"
+        if "SimSwap" in model_choice:
+            # Load SimSwap
+            from app.simswap_tester import SimSwapTester
+            self.deepfake_tester = SimSwapTester(device='auto')
+            success, msg = self.deepfake_tester.load_model()
+            return f"{'✅' if success else '❌'} {msg}"
+        else:
+            # Load InsightFace (default)
+            if self.deepfake_tester is None:
+                self.deepfake_tester = DeepfakeTester(device='auto')
+            success, msg = self.deepfake_tester.load_model()
+            return f"{'✅' if success else '❌'} {msg}"
     
     def run_protection_test(
         self,
         original: np.ndarray,
         protected: np.ndarray,
-        source_face: np.ndarray
+        source_face: np.ndarray,
+        model_choice: str
     ) -> Tuple[np.ndarray, str]:
         """Run complete protection test with face swapping."""
         if original is None or protected is None:
@@ -187,8 +195,9 @@ class AntiDeepfakeApp:
         if self.deepfake_tester is None or not self.deepfake_tester.model_loaded:
             return None, "❌ Please load Face Swapper first (click '1️⃣ Load Face Swapper')"
         
+        model_name = "SimSwap" if "SimSwap" in model_choice else "InsightFace inswapper"
         results_text = "🧪 **Face Swap Protection Test**\n\n"
-        results_text += "**Method:** InsightFace inswapper (real deepfake technology)\n\n"
+        results_text += f"**Method:** {model_name} (real deepfake technology)\n\n"
         
         # Step 1: Swap face on original image
         results_text += "**Step 1:** Swapping face on ORIGINAL image...\n"
@@ -320,13 +329,24 @@ class AntiDeepfakeApp:
         gr.Markdown("""
         ### 🧪 Test Protection with Real Face Swap
         
-        Uses **InsightFace inswapper** - the SAME technology used by DeepFaceLab, Roop, and FaceSwap!
+        Choose your face swapping method:
+        - **InsightFace (inswapper)**: Fast, good quality
+        - **SimSwap**: Slower but sharper, no blur
+        
         Upload a source face → it will be swapped onto your target images.
         **GPU recommended** - Takes ~5-10s on T4 GPU, ~30s on CPU.
         """)
         
         with gr.Row():
             with gr.Column():
+                # Model selection
+                model_choice = gr.Radio(
+                    choices=["InsightFace (inswapper)", "SimSwap"],
+                    value="SimSwap",
+                    label="Face Swap Model",
+                    info="SimSwap is recommended for better quality"
+                )
+                
                 gr.Markdown("**Target Images (auto-populated from Protection tab)**")
                 test_original_display = gr.Image(label="Original Image (from tab 1)", type="numpy", height=180, interactive=False)
                 test_protected_display = gr.Image(label="Protected Image (from tab 1)", type="numpy", height=180, interactive=False)
@@ -366,13 +386,13 @@ class AntiDeepfakeApp:
         # Event handlers
         load_model_btn.click(
             fn=self.load_deepfake_model,
-            inputs=[],
+            inputs=[model_choice],
             outputs=[model_status_box]
         )
         
         test_btn.click(
             fn=self.run_protection_test,
-            inputs=[original_state, protected_state, source_face_input],
+            inputs=[original_state, protected_state, source_face_input, model_choice],
             outputs=[test_output, test_results]
         )
     
