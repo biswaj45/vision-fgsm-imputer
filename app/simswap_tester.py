@@ -140,41 +140,17 @@ class SimSwapTester:
                 print("Please download from: https://drive.google.com/drive/folders/1jV6_0FIMPC53FZ2HzZNJZGMe55bbu17R")
                 return False, "❌ SimSwap Generator model not found!"
             
-            # Import SimSwap Generator architecture
-            try:
-                from .simswap_models import Generator_Adain_Upsample
-            except ImportError:
-                # Fallback for direct import
-                import sys
-                from pathlib import Path as PathLib
-                models_path = PathLib(__file__).parent / 'simswap_models.py'
-                import importlib.util
-                spec = importlib.util.spec_from_file_location("simswap_models", models_path)
-                simswap_models = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(simswap_models)
-                Generator_Adain_Upsample = simswap_models.Generator_Adain_Upsample
-            
-            self.G = Generator_Adain_Upsample(
-                input_nc=3,
-                output_nc=3,
-                latent_size=512,
-                n_blocks=9,
-                deep=False
-            )
-            
-            # Load generator weights
+            # Load the pre-trained model directly (it contains the architecture)
             checkpoint = torch.load(str(generator_path), map_location=self.device, weights_only=False)
-            if isinstance(checkpoint, dict):
-                if 'state_dict' in checkpoint:
-                    self.G.load_state_dict(checkpoint['state_dict'])
-                elif 'model' in checkpoint:
-                    self.G.load_state_dict(checkpoint['model'])
-                else:
-                    # Try loading directly
-                    self.G.load_state_dict(checkpoint)
-            else:
-                # Checkpoint is the model itself
+            
+            # The checkpoint IS the model (not a state_dict)
+            if hasattr(checkpoint, 'eval'):
+                # It's a model object
                 self.G = checkpoint
+                print("✅ Loaded model directly")
+            else:
+                print(f"❌ Unexpected checkpoint type: {type(checkpoint)}")
+                return False, "❌ Cannot load SimSwap generator - unexpected format"
             
             self.G.to(self.device)
             self.G.eval()
