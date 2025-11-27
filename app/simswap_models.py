@@ -1,133 +1,218 @@
 """
-SimSwap Generator Architecture.
-Simplified implementation for face swapping.
+Copyright (C) 2019 NVIDIA Corporation.  All rights reserved.
+Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
+Official SimSwap architecture from neuralchen/SimSwap repository (fs_networks.py)
+Architecture matches checkpoint layer names: first_layer, down1-3, BottleNeck, up3-1, last_layer
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
-class ResidualBlock(nn.Module):
-    """Residual block with AdaIN."""
-    
-    def __init__(self, dim, latent_size):
-        super().__init__()
-        self.conv1 = nn.Conv2d(dim, dim, 3, 1, 1, bias=False)
-        self.conv2 = nn.Conv2d(dim, dim, 3, 1, 1, bias=False)
-        
-        # AdaIN parameters from latent
-        self.adain1 = AdaptiveInstanceNorm(dim, latent_size)
-        self.adain2 = AdaptiveInstanceNorm(dim, latent_size)
-        
+class InstanceNorm(nn.Module):
+    def __init__(self, epsilon=1e-8):
+        """
+        @reference: https://github.com/lernapparat/lernapparat/blob/master/style_gan/pytorch_style_gan.ipynb
+        """
+        super(InstanceNorm, self).__init__()
+        self.epsilon = epsilon
+
+    def forward(self, x):
+        x = x - torch.mean(x, dim=[2, 3], keepdim=True)
+        tmp = torch.mul(x, x)
+        tmp = torch.rsqrt(torch.mean(tmp, dim=[2, 3], keepdim=True) + self.epsilon)
+        return x * tmp
+
+
+class ApplyStyle(nn.Module):
+    """
+    @reference: https://github.com/lernapparat/lernapparat/blob/master/style_gan/pytorch_style_gan.ipynb
+    """
+    def __init__(self, latent_size, channels):
+        super(ApplyStyle, self).__init__()
+        self.linear = nn.Linear(latent_size, channels * 2)
+
     def forward(self, x, latent):
-        residual = x
-        out = self.conv1(x)
-        out = self.adain1(out, latent)
-        out = F.relu(out)
-        out = self.conv2(out)
-        out = self.adain2(out, latent)
-        return out + residual
+        style = self.linear(latent)
+        shape = [-1, 2, x.size(1)] + [1] * (len(x.shape) - 2)
+        style = style.view(shape)
+        x = x * (style[:, 0] + 1.) + style[:, 1]
+        return x
 
 
-class AdaptiveInstanceNorm(nn.Module):
-    """Adaptive Instance Normalization."""
-    
-    def __init__(self, num_features, latent_size):
-        super().__init__()
-        self.norm = nn.InstanceNorm2d(num_features, affine=False)
-        
-        # Learn scale and bias from latent
-        self.fc = nn.Linear(latent_size, num_features * 2)
-        
-    def forward(self, x, latent):
-        # Normalize
-        h = self.norm(x)
-        
-        # Get adaptive parameters
-        style = self.fc(latent)
-        gamma, beta = style.chunk(2, dim=1)
-        gamma = gamma.view(-1, x.size(1), 1, 1)
-        beta = beta.view(-1, x.size(1), 1, 1)
-        
-        # Apply adaptive affine transform
-        return gamma * h + beta
+class ResnetBlock_Adain(nn.Module):
+    """Residual block with AdaIN style injection"""
+    def __init__(self, dim, latent_size, padding_type, activation=nn.ReLU(True)):
+        super(ResnetBlock_Adain, self).__init__()
+
+        p = 0
+        conv1 = []
+        if padding_type == 'reflect':
+            conv1 += [nn.ReflectionPad2d(1)]
+        elif padding_type == 'replicate':
+            conv1 += [nn.ReplicationPad2d(1)]
+        elif padding_type == 'zero':
+            p = 1
+        else:
+            raise NotImplementedError('padding [%s] is not implemented' % padding_type)
+        conv1 += [nn.Conv2d(dim, dim, kernel_size=3, padding=p), InstanceNorm()]
+        self.conv1 = nn.Sequential(*conv1)
+        self.style1 = ApplyStyle(latent_size, dim)
+        self.act1 = activation
+
+        p = 0
+        conv2 = []
+        if padding_type == 'reflect':
+            conv2 += [nn.ReflectionPad2d(1)]
+        elif padding_type == 'replicate':
+            conv2 += [nn.ReplicationPad2d(1)]
+        elif padding_type == 'zero':
+            p = 1
+        else:
+            raise NotImplementedError('padding [%s] is not implemented' % padding_type)
+        conv2 += [nn.Conv2d(dim, dim, kernel_size=3, padding=p), InstanceNorm()]
+        self.conv2 = nn.Sequential(*conv2)
+        self.style2 = ApplyStyle(latent_size, dim)
+
+    def forward(self, x, dlatents_in_slice):
+        y = self.conv1(x)
+        y = self.style1(y, dlatents_in_slice)
+        y = self.act1(y)
+        y = self.conv2(y)
+        y = self.style2(y, dlatents_in_slice)
+        out = x + y
+        return out
 
 
 class Generator_Adain_Upsample(nn.Module):
     """
-    SimSwap Generator with AdaIN for identity injection.
-    Input: target face image (3x224x224)
-    Latent: source identity embedding (512-dim)
-    Output: swapped face (3x224x224)
+    SimSwap Generator with AdaIN-based style injection
+    Official implementation from neuralchen/SimSwap (fs_networks.py)
+    Architecture matches checkpoint layer names: first_layer, down1-3, BottleNeck, up3-1, last_layer
     """
-    
     def __init__(
         self,
-        input_nc=3,
-        output_nc=3,
-        latent_size=512,
-        ngf=64,
-        n_blocks=9,
-        deep=False
+        input_nc,
+        output_nc,
+        latent_size,
+        n_blocks=6,
+        deep=False,
+        norm_layer=nn.BatchNorm2d,
+        padding_type='reflect'
     ):
-        super().__init__()
-        
-        # Encoder
-        self.encoder = nn.Sequential(
+        assert (n_blocks >= 0)
+        super(Generator_Adain_Upsample, self).__init__()
+        activation = nn.ReLU(True)
+        self.deep = deep
+
+        # First layer (matches checkpoint key: first_layer.1.weight)
+        self.first_layer = nn.Sequential(
             nn.ReflectionPad2d(3),
-            nn.Conv2d(input_nc, ngf, 7, 1, 0, bias=False),
-            nn.InstanceNorm2d(ngf),
-            nn.ReLU(True),
-            
-            # Downsample
-            nn.Conv2d(ngf, ngf * 2, 3, 2, 1, bias=False),
-            nn.InstanceNorm2d(ngf * 2),
-            nn.ReLU(True),
-            
-            nn.Conv2d(ngf * 2, ngf * 4, 3, 2, 1, bias=False),
-            nn.InstanceNorm2d(ngf * 4),
-            nn.ReLU(True),
+            nn.Conv2d(input_nc, 64, kernel_size=7, padding=0),
+            norm_layer(64),
+            activation
         )
         
-        # Residual blocks with AdaIN
-        self.res_blocks = nn.ModuleList([
-            ResidualBlock(ngf * 4, latent_size) for _ in range(n_blocks)
-        ])
+        # Downsample (matches checkpoint keys: down1.0.weight, down2.0.weight, down3.0.weight)
+        self.down1 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            norm_layer(128),
+            activation
+        )
+        self.down2 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            norm_layer(256),
+            activation
+        )
+        self.down3 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
+            norm_layer(512),
+            activation
+        )
         
-        # Decoder
-        self.decoder = nn.Sequential(
-            # Upsample
-            nn.ConvTranspose2d(ngf * 4, ngf * 2, 3, 2, 1, output_padding=1, bias=False),
-            nn.InstanceNorm2d(ngf * 2),
-            nn.ReLU(True),
-            
-            nn.ConvTranspose2d(ngf * 2, ngf, 3, 2, 1, output_padding=1, bias=False),
-            nn.InstanceNorm2d(ngf),
-            nn.ReLU(True),
-            
-            # Output
+        if self.deep:
+            self.down4 = nn.Sequential(
+                nn.Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
+                norm_layer(512),
+                activation
+            )
+
+        # Residual blocks with AdaIN (matches checkpoint: BottleNeck.0-8)
+        BN = []
+        for i in range(n_blocks):
+            BN += [ResnetBlock_Adain(512, latent_size=latent_size, padding_type=padding_type, activation=activation)]
+        self.BottleNeck = nn.Sequential(*BN)
+
+        # Upsample (matches checkpoint keys: up4, up3.1.weight, up2.1.weight, up1.1.weight)
+        if self.deep:
+            self.up4 = nn.Sequential(
+                nn.Upsample(scale_factor=2, mode='bilinear'),
+                nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(512),
+                activation
+            )
+        
+        self.up3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(512, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            activation
+        )
+        self.up2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            activation
+        )
+        self.up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            activation
+        )
+        
+        # Last layer (matches checkpoint: last_layer.1.weight)
+        self.last_layer = nn.Sequential(
             nn.ReflectionPad2d(3),
-            nn.Conv2d(ngf, output_nc, 7, 1, 0),
+            nn.Conv2d(64, output_nc, kernel_size=7, padding=0),
             nn.Tanh()
         )
-        
-    def forward(self, x, latent):
+
+    def forward(self, input, dlatents):
         """
         Args:
-            x: Target face image (B, 3, 224, 224)
-            latent: Source identity (B, 512)
+            input: Input image tensor [B, 3, 224, 224]
+            dlatents: Style latent code [B, latent_size]
+        
         Returns:
-            Swapped face (B, 3, 224, 224)
+            Generated face tensor [B, 3, 224, 224]
         """
-        # Encode
-        feat = self.encoder(x)
+        x = input
+
+        # Encoder
+        skip1 = self.first_layer(x)
+        skip2 = self.down1(skip1)
+        skip3 = self.down2(skip2)
         
-        # Apply residual blocks with identity injection
-        for block in self.res_blocks:
-            feat = block(feat, latent)
+        if self.deep:
+            skip4 = self.down3(skip3)
+            x = self.down4(skip4)
+        else:
+            x = self.down3(skip3)
+
+        # Bottleneck with style injection
+        for i in range(len(self.BottleNeck)):
+            x = self.BottleNeck[i](x, dlatents)
+
+        # Decoder
+        if self.deep:
+            x = self.up4(x)
+        x = self.up3(x)
+        x = self.up2(x)
+        x = self.up1(x)
+        x = self.last_layer(x)
         
-        # Decode
-        out = self.decoder(feat)
-        
-        return out
+        # Normalize to [0, 1]
+        x = (x + 1) / 2
+
+        return x

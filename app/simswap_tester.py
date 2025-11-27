@@ -140,21 +140,50 @@ class SimSwapTester:
                 print("Please download from: https://drive.google.com/drive/folders/1jV6_0FIMPC53FZ2HzZNJZGMe55bbu17R")
                 return False, "❌ SimSwap Generator model not found!"
             
-            # Load the pre-trained model directly (it contains the architecture)
-            checkpoint = torch.load(str(generator_path), map_location=self.device, weights_only=False)
+            # Import official architecture
+            try:
+                from app.simswap_models import Generator_Adain_Upsample
+            except ImportError:
+                # Fallback for direct module loading
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(
+                    "simswap_models",
+                    PathLib(__file__).parent / "simswap_models.py"
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                Generator_Adain_Upsample = module.Generator_Adain_Upsample
             
-            # The checkpoint IS the model (not a state_dict)
-            if hasattr(checkpoint, 'eval'):
-                # It's a model object
-                self.G = checkpoint
-                print("✅ Loaded model directly")
+            # Create model with official architecture (matches checkpoint)
+            print("Instantiating Generator (input_nc=3, output_nc=3, latent_size=512, n_blocks=9, deep=False)...")
+            self.G = Generator_Adain_Upsample(
+                input_nc=3,
+                output_nc=3,
+                latent_size=512,
+                n_blocks=9,
+                deep=False,
+                norm_layer=nn.BatchNorm2d,
+                padding_type='reflect'
+            )
+            
+            # Load checkpoint state_dict
+            print("Loading checkpoint state_dict...")
+            checkpoint = torch.load(str(generator_path), map_location='cpu', weights_only=False)
+            
+            # Checkpoint is OrderedDict (state_dict)
+            if isinstance(checkpoint, dict) and 'first_layer.1.weight' in checkpoint:
+                self.G.load_state_dict(checkpoint, strict=True)
+                print("✅ State dict loaded successfully (strict=True)")
             else:
-                print(f"❌ Unexpected checkpoint type: {type(checkpoint)}")
+                print(f"❌ Unexpected checkpoint format: {type(checkpoint)}")
+                if isinstance(checkpoint, dict):
+                    print(f"Keys sample: {list(checkpoint.keys())[:5]}")
                 return False, "❌ Cannot load SimSwap generator - unexpected format"
             
             self.G.to(self.device)
             self.G.eval()
             print("✅ SimSwap Generator loaded (210MB)")
+
             
             # ArcFace for embeddings is already in buffalo_l
             self.model_loaded = True
