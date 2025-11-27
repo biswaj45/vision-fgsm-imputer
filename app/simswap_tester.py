@@ -55,34 +55,69 @@ class SimSwapTester:
             model_dir.mkdir(parents=True, exist_ok=True)
             model_path = model_dir / 'simswap_224.pth'
             
+            # Also check for the archive format
+            archive_dir = model_dir / 'SimSwap' / 'arcface_model' / 'archive'
+            
             if not model_path.exists():
-                print("Downloading SimSwap model (~530MB, one-time download)...")
-                # Try multiple sources
-                sources = [
-                    ('https://huggingface.co/deepinsight/SimSwap/resolve/main/arcface_checkpoint.tar', 'HuggingFace'),
-                    ('https://github.com/neuralchen/SimSwap/releases/download/v1.0/arcface_checkpoint.tar', 'GitHub'),
-                ]
-                
-                downloaded = False
-                for url, source in sources:
+                # Check if we have the archive format already
+                if archive_dir.exists():
+                    print("Converting existing archive format to .pth...")
                     try:
-                        print(f"Trying {source}...")
-                        import urllib.request
-                        urllib.request.urlretrieve(url, str(model_path))
-                        print(f"✅ Model downloaded from {source}!")
-                        downloaded = True
-                        break
+                        checkpoint = torch.load(str(archive_dir), map_location='cpu')
+                        torch.save(checkpoint, str(model_path))
+                        print("✅ Model converted from archive format!")
                     except Exception as e:
-                        print(f"Failed from {source}: {e}")
-                        continue
-                
-                if not downloaded:
-                    return False, (
-                        "❌ Failed to download SimSwap model from all sources.\n"
-                        "Please download manually from:\n"
-                        "https://github.com/neuralchen/SimSwap\n"
-                        "Or use InsightFace (inswapper) instead."
-                    )
+                        print(f"Failed to convert archive: {e}")
+                else:
+                    print("Downloading SimSwap model (~200MB, one-time download)...")
+                    # Try multiple sources - download the zip archive
+                    sources = [
+                        ('https://github.com/neuralchen/SimSwap/releases/download/1.0/arcface_checkpoint.tar', 'GitHub'),
+                    ]
+                    
+                    downloaded = False
+                    tar_path = model_dir / 'arcface_checkpoint.tar'
+                    
+                    for url, source in sources:
+                        try:
+                            print(f"Trying {source}...")
+                            import urllib.request
+                            urllib.request.urlretrieve(url, str(tar_path))
+                            print(f"✅ Downloaded from {source}!")
+                            
+                            # Extract using zipfile (it's actually a zip despite .tar extension)
+                            import zipfile
+                            extract_dir = model_dir / 'SimSwap' / 'arcface_model'
+                            extract_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            with zipfile.ZipFile(str(tar_path), 'r') as zip_ref:
+                                zip_ref.extractall(str(extract_dir))
+                            print("✅ Extracted archive!")
+                            
+                            # Convert to .pth format
+                            archive_path = extract_dir / 'archive'
+                            if archive_path.exists():
+                                checkpoint = torch.load(str(archive_path), map_location='cpu')
+                                torch.save(checkpoint, str(model_path))
+                                print("✅ Model converted successfully!")
+                                downloaded = True
+                                
+                                # Cleanup
+                                tar_path.unlink()
+                                break
+                            else:
+                                print(f"Archive directory not found at {archive_path}")
+                        except Exception as e:
+                            print(f"Failed from {source}: {e}")
+                            continue
+                    
+                    if not downloaded:
+                        return False, (
+                            "❌ Failed to download SimSwap model from all sources.\n"
+                            "Please download manually from:\n"
+                            "https://github.com/neuralchen/SimSwap\n"
+                            "Or use InsightFace (inswapper) instead."
+                        )
             
             # Load SimSwap generator
             print("Loading SimSwap generator...")
