@@ -118,7 +118,8 @@ class SimSwapTester:
             # Load ArcFace model for face embeddings
             print("Loading ArcFace model for embeddings...")
             try:
-                arcface_path = Path(__file__).parent.parent / 'arcface_model' / 'arcface_checkpoint.tar'
+                from pathlib import Path as PathLib
+                arcface_path = PathLib(__file__).parent.parent / 'arcface_model' / 'arcface_checkpoint.tar'
                 if arcface_path.exists():
                     self.arcface = torch.load(str(arcface_path), map_location=self.device, weights_only=False)
                 else:
@@ -131,7 +132,8 @@ class SimSwapTester:
             
             # Load SimSwap Generator
             print("Loading SimSwap Generator...")
-            generator_path = Path(__file__).parent.parent / 'checkpoints' / 'people' / 'latest_net_G.pth'
+            from pathlib import Path as PathLib
+            generator_path = PathLib(__file__).parent.parent / 'checkpoints' / 'people' / 'latest_net_G.pth'
             
             if not generator_path.exists():
                 print(f"❌ Generator not found at {generator_path}")
@@ -144,8 +146,8 @@ class SimSwapTester:
             except ImportError:
                 # Fallback for direct import
                 import sys
-                from pathlib import Path
-                models_path = Path(__file__).parent / 'simswap_models.py'
+                from pathlib import Path as PathLib
+                models_path = PathLib(__file__).parent / 'simswap_models.py'
                 import importlib.util
                 spec = importlib.util.spec_from_file_location("simswap_models", models_path)
                 simswap_models = importlib.util.module_from_spec(spec)
