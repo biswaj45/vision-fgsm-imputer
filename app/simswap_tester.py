@@ -139,7 +139,18 @@ class SimSwapTester:
                 return False, "❌ SimSwap Generator model not found!"
             
             # Import SimSwap Generator architecture
-            from .simswap_models import Generator_Adain_Upsample
+            try:
+                from .simswap_models import Generator_Adain_Upsample
+            except ImportError:
+                # Fallback for direct import
+                import sys
+                from pathlib import Path
+                models_path = Path(__file__).parent / 'simswap_models.py'
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("simswap_models", models_path)
+                simswap_models = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(simswap_models)
+                Generator_Adain_Upsample = simswap_models.Generator_Adain_Upsample
             
             self.G = Generator_Adain_Upsample(
                 input_nc=3,
