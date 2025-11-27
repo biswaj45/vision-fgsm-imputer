@@ -9,30 +9,69 @@ from pathlib import Path
 def convert_archive():
     """Convert PyTorch archive format to .pth"""
     
-    # Paths
-    archive_path = Path.home() / '.simswap' / 'checkpoints' / 'SimSwap' / 'arcface_model' / 'archive'
+    # Paths - the actual model file to load
+    # PyTorch saves models as a zip with archive/ subfolder containing data files
+    model_dir = Path.home() / '.simswap' / 'checkpoints' / 'SimSwap' / 'arcface_model'
+    archive_path = model_dir / 'archive'
     output_path = Path.home() / '.simswap' / 'checkpoints' / 'simswap_224.pth'
     
-    print(f"Loading from: {archive_path}")
+    print(f"Model directory: {model_dir}")
+    print(f"Archive path: {archive_path}")
     
     if not archive_path.exists():
         print(f"❌ Archive not found at {archive_path}")
         print("\nExpected structure:")
-        print("  ~/.simswap/checkpoints/SimSwap/arcface_model/archive/")
-        print("    ├── data.pkl")
-        print("    ├── data/")
-        print("    │   ├── 0, 1, 2, ..., 795")
-        print("    └── version")
+        print("  ~/.simswap/checkpoints/SimSwap/arcface_model/")
+        print("    └── archive/")
+        print("        ├── data.pkl")
+        print("        ├── data/")
+        print("        │   ├── 0, 1, 2, ..., 795")
+        print("        └── version")
         return False
     
     try:
-        # Load the archive format (PyTorch pickle)
-        print("Loading model...")
-        checkpoint = torch.load(str(archive_path), map_location='cpu')
+        # PyTorch stores models in a zip format with an 'archive' folder
+        # We can load by creating a zip file or by reconstructing the path
+        
+        print("Loading model (this is actually an ArcFace backbone for embeddings)...")
+        
+        # The archive folder structure is PyTorch's internal format
+        # Let's try loading the parent tar/zip file if it exists
+        tar_file = model_dir.parent / 'arcface_checkpoint.tar'
+        
+        if tar_file.exists():
+            print(f"Loading from tar file: {tar_file}")
+            # It's actually a PyTorch zip despite the .tar extension
+            # Need weights_only=False for custom ArcFace model classes
+            checkpoint = torch.load(tar_file, map_location='cpu', weights_only=False)
+        else:
+            # If no tar file, we need to reconstruct from the archive directory
+            print("No tar file found, reconstructing from archive directory...")
+            print("Note: This model is the ArcFace checkpoint for face embeddings.")
+            
+            # For SimSwap, the arcface_checkpoint.tar contains ArcFace model
+            # We actually need to load it differently - it's not a direct state dict
+            
+            # Let's check what's in data.pkl
+            import pickle
+            data_pkl = archive_path / 'data.pkl'
+            if data_pkl.exists():
+                print(f"Reading data.pkl...")
+                with open(data_pkl, 'rb') as f:
+                    metadata = pickle.load(f)
+                print(f"Metadata type: {type(metadata)}")
+                if isinstance(metadata, (list, tuple)):
+                    print(f"Metadata length: {len(metadata)}")
+                    print(f"First items: {metadata[:3] if len(metadata) > 3 else metadata}")
+            
+            print("\n⚠️ The extracted archive needs to be loaded as a zip file.")
+            print("Please use the tar file directly or re-extract properly.")
+            return False
         
         print(f"Model type: {type(checkpoint)}")
         if isinstance(checkpoint, dict):
-            print(f"Keys: {checkpoint.keys()}")
+            keys = list(checkpoint.keys())
+            print(f"Keys: {keys[:10]}...")  # Show first 10 keys
         
         # Save as standard .pth
         output_path.parent.mkdir(parents=True, exist_ok=True)
