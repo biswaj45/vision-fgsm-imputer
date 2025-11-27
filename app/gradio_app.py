@@ -20,7 +20,7 @@ from typing import Tuple, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from inference.predict import NoiseImputer
-from demo_utils import (
+from utils.demo_utils import (
     create_side_by_side,
     compute_difference_heatmap,
     format_inference_time,
