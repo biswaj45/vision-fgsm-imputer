@@ -29,6 +29,9 @@ class DeepfakeTester:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         else:
             self.device = device
+        
+        # Force CPU for ONNX Runtime if CUDA not available
+        self.onnx_device = 'cuda' if (self.device == 'cuda' and torch.cuda.is_available()) else 'cpu'
         self.app = None
         self.swapper = None
         self.model_loaded = False
@@ -39,12 +42,24 @@ class DeepfakeTester:
             return False, "❌ insightface not installed. Run: pip install insightface onnxruntime-gpu"
         
         try:
-            print(f"Loading InsightFace Face Swapper on {self.device.upper()}...")
+            print(f"Loading InsightFace Face Swapper on {self.onnx_device.upper()}...")
             
-            # Initialize face analysis
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.device == 'cuda' else ['CPUExecutionProvider']
-            self.app = FaceAnalysis(name='buffalo_l', providers=providers)
-            self.app.prepare(ctx_id=0 if self.device == 'cuda' else -1, det_size=(640, 640))
+            # Initialize face analysis with CPU fallback
+            if self.onnx_device == 'cuda':
+                try:
+                    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                    self.app = FaceAnalysis(name='buffalo_l', providers=providers)
+                    self.app.prepare(ctx_id=0, det_size=(640, 640))
+                except:
+                    print("⚠️  CUDA not available for ONNX, falling back to CPU...")
+                    self.onnx_device = 'cpu'
+                    providers = ['CPUExecutionProvider']
+                    self.app = FaceAnalysis(name='buffalo_l', providers=providers)
+                    self.app.prepare(ctx_id=-1, det_size=(640, 640))
+            else:
+                providers = ['CPUExecutionProvider']
+                self.app = FaceAnalysis(name='buffalo_l', providers=providers)
+                self.app.prepare(ctx_id=-1, det_size=(640, 640))
             
             # Download inswapper model if not exists
             model_dir = os.path.expanduser('~/.insightface/models/inswapper')
@@ -77,7 +92,7 @@ class DeepfakeTester:
                 print(f"  - {inp.name}: shape={inp.shape}, type={inp.type}")
             
             self.model_loaded = True
-            return True, f"✅ InsightFace Face Swapper loaded on {self.device.upper()} - Ready for realistic deepfakes!"
+            return True, f"✅ InsightFace Face Swapper loaded on {self.onnx_device.upper()} - Ready for realistic deepfakes!"
         except Exception as e:
             return False, f"❌ Failed: {str(e)}\n\nTry manual download:\n1. Download from: https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128.onnx\n2. Place in: ~/.insightface/models/inswapper/"
     
