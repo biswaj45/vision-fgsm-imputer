@@ -24,21 +24,20 @@ def main():
     from inference.predict import NoiseImputer
     
     # Initialize protector
-    imputer = NoiseImputer(model_path='/content/vision-fgsm-imputer/saved_models/best.pth')
+    imputer = NoiseImputer(
+        model_path='/content/vision-fgsm-imputer/saved_models/best.pth',
+        epsilon=0.15
+    )
     
     target_img = Image.open(target_path)
     target_np = np.array(target_img)
     
-    # Apply protection
-    protected_np = imputer.add_noise(
-        target_np,
-        epsilon=0.15,
-        boost_strength=2.0
-    )
+    # Apply protection using impute_from_array
+    protected_np = imputer.impute_from_array(target_np, return_perturbation=False)
     
     protected_path = '/content/target_protected.jpg'
     Image.fromarray(protected_np).save(protected_path)
-    print(f"✅ FGSM protection applied (epsilon=0.15, boost=2.0)")
+    print(f"✅ FGSM protection applied (epsilon=0.15)")
     print(f"✅ Protected image saved to: {protected_path}")
     
     # Step 2: Load SimSwap
