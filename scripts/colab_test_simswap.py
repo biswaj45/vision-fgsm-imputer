@@ -48,16 +48,19 @@ def test_simswap():
     
     # Select source and target
     if len(images) < 2:
-        print("\n❌ Need at least 2 images (source face + target face)")
+        print("\n❌ Need at least 2 images")
+        print("   - Image 1: SOURCE (whose face identity to extract)")
+        print("   - Image 2: TARGET (whose face will be replaced)")
         print("Upload more images and try again.")
         return False
     
-    source_path = images[0]
-    target_path = images[1] if len(images) > 1 else images[0]
+    source_path = images[0]  # Image 1: Person A's face (identity to steal)
+    target_path = images[1]  # Image 2: Person B's face (will be replaced with A's identity)
     
-    print(f"\n2. Using:")
-    print(f"   Source: {source_path.name}")
-    print(f"   Target: {target_path.name}")
+    print(f"\n2. Face Swap Setup:")
+    print(f"   SOURCE (identity): {source_path.name} - Extract face identity from this person")
+    print(f"   TARGET (replace): {target_path.name} - Replace this person's face with SOURCE identity")
+    print(f"   Result: Person from TARGET image will look like person from SOURCE image")
     
     # Load images
     print("\n3. Loading images...")
@@ -129,9 +132,12 @@ def test_simswap():
             
             # Add labels
             font = cv2.FONT_HERSHEY_SIMPLEX
-            cv2.putText(comparison, 'SOURCE', (10, 30), font, 1, (255, 255, 255), 2)
-            cv2.putText(comparison, 'TARGET', (new_w + 10, 30), font, 1, (255, 255, 255), 2)
-            cv2.putText(comparison, 'SWAPPED', (new_w*2 + 10, 30), font, 1, (255, 255, 255), 2)
+            cv2.putText(comparison, 'SOURCE FACE', (10, 30), font, 1, (255, 255, 255), 2)
+            cv2.putText(comparison, 'TARGET FACE', (new_w + 10, 30), font, 1, (255, 255, 255), 2)
+            cv2.putText(comparison, 'RESULT', (new_w*2 + 10, 30), font, 1, (0, 255, 0), 2)
+            cv2.putText(comparison, '(identity)', (10, 60), font, 0.6, (200, 200, 200), 1)
+            cv2.putText(comparison, '(replaced)', (new_w + 10, 60), font, 0.6, (200, 200, 200), 1)
+            cv2.putText(comparison, '(SOURCE on TARGET)', (new_w*2 + 10, 60), font, 0.6, (0, 200, 0), 1)
             
             # Save comparison
             comparison_path = Path('/content/simswap_comparison.jpg')
