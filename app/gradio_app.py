@@ -197,9 +197,9 @@ class AntiDeepfakeApp:
             source_image=source_face
         )
         results_text += f"{status_orig}\n"
-        if metrics_orig:
-            results_text += f"  - MSE: {metrics_orig['mse']:.2f} ({metrics_orig.get('swap_strength', 'Unknown')} change)\n"
-            results_text += f"  - PSNR: {metrics_orig['psnr']:.2f} dB\n"
+        if metrics_orig and metrics_orig.get('mse', 0) > 0:
+            results_text += f"  - MSE: {metrics_orig.get('mse', 0):.2f} ({metrics_orig.get('swap_strength', 'Unknown')} change)\n"
+            results_text += f"  - PSNR: {metrics_orig.get('psnr', 0):.2f} dB\n"
             results_text += f"  - Quality: {'Good' if metrics_orig.get('std', 0) > 30 else 'Poor'}\n\n"
         
         # Step 2: Swap face on protected image  
@@ -209,9 +209,9 @@ class AntiDeepfakeApp:
             source_image=source_face
         )
         results_text += f"{status_prot}\n"
-        if metrics_prot:
-            results_text += f"  - MSE: {metrics_prot['mse']:.2f} ({metrics_prot.get('swap_strength', 'Unknown')} change)\n"
-            results_text += f"  - PSNR: {metrics_prot['psnr']:.2f} dB\n\n"
+        if metrics_prot and metrics_prot.get('mse', 0) > 0:
+            results_text += f"  - MSE: {metrics_prot.get('mse', 0):.2f} ({metrics_prot.get('swap_strength', 'Unknown')} change)\n"
+            results_text += f"  - PSNR: {metrics_prot.get('psnr', 0):.2f} dB\n\n"
         
         # Step 3: Verdict
         results_text += "**Final Verdict:**\n"

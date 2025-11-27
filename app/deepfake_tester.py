@@ -152,7 +152,13 @@ class DeepfakeTester:
             return result_img, status, metrics
             
         except Exception as e:
-            return None, f"❌ Face swap failed: {str(e)}\n🛡️ Protection working!", {'corruption_detected': True}
+            return None, f"❌ Face swap failed: {str(e)}\n🛡️ Protection working!", {
+                'corruption_detected': True,
+                'mse': 0,
+                'psnr': 0,
+                'std': 0,
+                'swap_strength': 'Failed'
+            }
     
     def _swap_face(self, target_img: np.ndarray, target_face, source_face) -> np.ndarray:
         """Perform face swap using ONNX model."""
@@ -313,14 +319,17 @@ class DeepfakeTester:
         
         dst = lmk.astype(np.float32)
         
-        # Estimate similarity transform (rotation + scale + translation)
-        tform = cv2.estimateAffinePartial2D(src, dst, method=cv2.RANSAC)[0]
+        # Swap src and dst - we want to transform FROM image space TO template space
+        # This is the correct direction for warpAffine
+        tform = cv2.estimateAffinePartial2D(dst, src, method=cv2.RANSAC)
         
-        if tform is None:
+        if tform is None or tform[0] is None:
             # Fallback: use full affine
-            tform = cv2.getAffineTransform(src[:3], dst[:3])
+            tform_matrix = cv2.getAffineTransform(dst[:3], src[:3])
+        else:
+            tform_matrix = tform[0]
         
-        return tform
+        return tform_matrix
     
     def _compute_metrics(self, original: np.ndarray, generated: np.ndarray) -> dict:
         """Compute metrics."""
