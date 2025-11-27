@@ -6,7 +6,7 @@ latent_dim: 128  # Only for autoencoder
 
 # Training hyperparameters
 batch_size: 16
-num_epochs: 50
+num_epochs: 100  # Increased from 50 for better convergence on T4
 learning_rate: 0.001
 weight_decay: 0.00001
 epsilon: 0.05  # FGSM perturbation magnitude (increased for stronger protection)

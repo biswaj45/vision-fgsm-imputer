@@ -183,7 +183,7 @@ def verify_dataset(data_dir: str):
     print("="*60)
 
 
-def create_sample_dataset(output_dir: str, num_samples: int = 100):
+def create_sample_dataset(output_dir: str, num_samples: int = 500):
     """
     Create a small sample dataset with synthetic images for testing.
     

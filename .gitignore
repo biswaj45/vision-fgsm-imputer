@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Data
+data/train/
+data/val/
+data/test/
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Outputs (training artifacts - not the saved models)
+outputs/logs/
+outputs/tensorboard/
+outputs/checkpoints/*.pth.tmp
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Model files (comment out if you want to save models in git)
+# saved_models/*.pth
+
+# Environment
+.env
