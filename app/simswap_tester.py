@@ -57,13 +57,32 @@ class SimSwapTester:
             
             if not model_path.exists():
                 print("Downloading SimSwap model (~530MB, one-time download)...")
-                # SimSwap 224 model from Google Drive
-                model_url = 'https://drive.google.com/uc?id=1TKhJQ0vGbP75HYQqiPz8biGPRWIbz_fo'
-                try:
-                    gdown.download(model_url, str(model_path), quiet=False)
-                    print("✅ Model downloaded!")
-                except Exception as e:
-                    return False, f"❌ Failed to download SimSwap model: {e}"
+                # Try multiple sources
+                sources = [
+                    ('https://huggingface.co/deepinsight/SimSwap/resolve/main/arcface_checkpoint.tar', 'HuggingFace'),
+                    ('https://github.com/neuralchen/SimSwap/releases/download/v1.0/arcface_checkpoint.tar', 'GitHub'),
+                ]
+                
+                downloaded = False
+                for url, source in sources:
+                    try:
+                        print(f"Trying {source}...")
+                        import urllib.request
+                        urllib.request.urlretrieve(url, str(model_path))
+                        print(f"✅ Model downloaded from {source}!")
+                        downloaded = True
+                        break
+                    except Exception as e:
+                        print(f"Failed from {source}: {e}")
+                        continue
+                
+                if not downloaded:
+                    return False, (
+                        "❌ Failed to download SimSwap model from all sources.\n"
+                        "Please download manually from:\n"
+                        "https://github.com/neuralchen/SimSwap\n"
+                        "Or use InsightFace (inswapper) instead."
+                    )
             
             # Load SimSwap generator
             print("Loading SimSwap generator...")

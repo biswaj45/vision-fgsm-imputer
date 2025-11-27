@@ -56,7 +56,28 @@ vision_fgsm_imputer/
 └── COPILOT_INSTRUCTIONS.md
 ```
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Google Colab)
+
+```python
+# 1. Install dependencies
+!wget -q https://raw.githubusercontent.com/biswaj45/vision-fgsm-imputer/main/scripts/setup_colab.py
+!python setup_colab.py
+
+# Or manually:
+!pip install insightface onnxruntime-gpu gdown gradio torch torchvision albumentations
+
+# 2. Clone repository
+!git clone https://github.com/biswaj45/vision-fgsm-imputer.git
+%cd vision-fgsm-imputer
+
+# 3. Download trained model
+!python scripts/check_model_in_repo.py --action download
+
+# 4. Launch Gradio app
+!python app/gradio_app.py --share
+```
+
+## 📦 Installation (Local)
 
 ### Installation
 
