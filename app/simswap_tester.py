@@ -4,6 +4,7 @@ Better quality than inswapper, no blur issues.
 """
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from PIL import Image
