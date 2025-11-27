@@ -118,21 +118,58 @@ class SimSwapTester:
             # Load ArcFace model for face embeddings
             print("Loading ArcFace model for embeddings...")
             try:
-                self.arcface = torch.load(model_path, map_location=self.device, weights_only=False)
+                arcface_path = Path(__file__).parent.parent / 'arcface_model' / 'arcface_checkpoint.tar'
+                if arcface_path.exists():
+                    self.arcface = torch.load(str(arcface_path), map_location=self.device, weights_only=False)
+                else:
+                    self.arcface = torch.load(model_path, map_location=self.device, weights_only=False)
                 if hasattr(self.arcface, 'eval'):
                     self.arcface.eval()
                 print("✅ ArcFace model loaded (for face embeddings)")
             except Exception as e:
-                print(f"Warning loading model: {e}")
+                print(f"Warning loading ArcFace: {e}")
             
-            # Note: For full SimSwap, we also need the Generator model (simswap_224.pth generator)
-            # The arcface_checkpoint.tar is just for face embeddings
-            # For now, we'll use InsightFace's face swapper with improved ArcFace embeddings
-            print("Note: Using ArcFace embeddings with InsightFace face swapper")
+            # Load SimSwap Generator
+            print("Loading SimSwap Generator...")
+            generator_path = Path(__file__).parent.parent / 'checkpoints' / 'people' / 'latest_net_G.pth'
+            
+            if not generator_path.exists():
+                print(f"❌ Generator not found at {generator_path}")
+                print("Please download from: https://drive.google.com/drive/folders/1jV6_0FIMPC53FZ2HzZNJZGMe55bbu17R")
+                return False, "❌ SimSwap Generator model not found!"
+            
+            # Import SimSwap Generator architecture
+            from .simswap_models import Generator_Adain_Upsample
+            
+            self.G = Generator_Adain_Upsample(
+                input_nc=3,
+                output_nc=3,
+                latent_size=512,
+                n_blocks=9,
+                deep=False
+            )
+            
+            # Load generator weights
+            checkpoint = torch.load(str(generator_path), map_location=self.device, weights_only=False)
+            if isinstance(checkpoint, dict):
+                if 'state_dict' in checkpoint:
+                    self.G.load_state_dict(checkpoint['state_dict'])
+                elif 'model' in checkpoint:
+                    self.G.load_state_dict(checkpoint['model'])
+                else:
+                    # Try loading directly
+                    self.G.load_state_dict(checkpoint)
+            else:
+                # Checkpoint is the model itself
+                self.G = checkpoint
+            
+            self.G.to(self.device)
+            self.G.eval()
+            print("✅ SimSwap Generator loaded (210MB)")
             
             # ArcFace for embeddings is already in buffalo_l
             self.model_loaded = True
-            return True, f"✅ SimSwap ArcFace loaded on {self.device.upper()} - Ready for face swapping!"
+            return True, f"✅ SimSwap loaded on {self.device.upper()} - Real SimSwap Generator ready!"
             
         except Exception as e:
             import traceback
@@ -217,9 +254,9 @@ class SimSwapTester:
             }
     
     def _swap_face(self, target_img: np.ndarray, target_face, source_face) -> Optional[np.ndarray]:
-        """Perform face swap using SimSwap."""
+        """Perform face swap using SimSwap Generator."""
         try:
-            # Get source embedding
+            # Get source embedding from InsightFace
             source_embedding = source_face.normed_embedding
             source_latent = torch.from_numpy(source_embedding).unsqueeze(0).to(self.device)
             print(f"Source embedding shape: {source_latent.shape}")
@@ -243,7 +280,7 @@ class SimSwapTester:
             
             print(f"Input tensor shape: {face_tensor.shape}, range: [{face_tensor.min():.3f}, {face_tensor.max():.3f}]")
             
-            # Run SimSwap
+            # Run SimSwap Generator
             with torch.no_grad():
                 swapped_tensor = self.G(face_tensor, source_latent)
             
