@@ -226,7 +226,8 @@ class AntiDeepfakeApp:
         results_text += "**Final Verdict:**\n"
         
         # First check if original face swap worked
-        if df_original is None or metrics_orig.get('mse', 0) < 500:
+        # Successful swap typically has MSE > 200 (face changed)
+        if df_original is None or metrics_orig.get('mse', 0) < 100:
             results_text += "⚠️ **TEST INCONCLUSIVE**\n"
             results_text += "Face swap on original image failed or too weak.\n"
             results_text += "Possible reasons:\n"
@@ -236,30 +237,32 @@ class AntiDeepfakeApp:
         elif metrics_prot and metrics_orig:
             mse_original = metrics_orig['mse']
             mse_protected = metrics_prot['mse']
+            swap_orig = metrics_orig.get('swap_strength', 'Unknown')
+            swap_prot = metrics_prot.get('swap_strength', 'Unknown')
             
-            # For face swap: successful swap should have MSE > 500
-            # Protected should either fail (MSE < 100) or create artifacts (MSE > 15000)
-            
+            # Check if protection degraded the swap quality
             if metrics_prot.get('corruption_detected'):
                 results_text += "✅ **PROTECTION WORKING!**\n"
-                if mse_protected < 100:
-                    results_text += f"Face swap FAILED on protected image (MSE: {mse_protected:.0f})\n"
-                else:
-                    results_text += f"Face swap created heavy artifacts (MSE: {mse_protected:.0f})\n"
+                results_text += f"Face swap detected as corrupted/artificial\n"
                 results_text += "**Result:** Protection successfully disrupted deepfake generation!\n"
-            elif mse_protected > 15000:
-                results_text += "✅ **STRONG PROTECTION**\n"
-                results_text += f"Face swap heavily corrupted (MSE: {mse_protected:.0f} vs {mse_original:.0f})\n"
-            elif mse_protected < 100:
+            elif swap_prot == 'Failed':
                 results_text += "✅ **EXCELLENT PROTECTION**\n"
                 results_text += f"Face swap completely failed on protected image!\n"
-            elif mse_original > 500 and mse_protected > 500:
+                results_text += f"Original: MSE={mse_original:.0f} ({swap_orig}), Protected: MSE={mse_protected:.0f} (Failed)\n"
+            elif swap_orig in ['Strong', 'Medium'] and swap_prot == 'Weak':
+                results_text += "✅ **PROTECTION WORKING**\n"
+                results_text += f"Swap quality degraded: {swap_orig} → {swap_prot}\n"
+                results_text += f"Original MSE: {mse_original:.0f}, Protected MSE: {mse_protected:.0f}\n"
+            elif mse_protected > mse_original * 1.5:
+                results_text += "✅ **PARTIAL PROTECTION**\n"
+                results_text += f"Protected image shows more artifacts (MSE increased by {((mse_protected/mse_original)-1)*100:.0f}%)\n"
+            elif swap_orig == swap_prot and abs(mse_protected - mse_original) < 200:
                 results_text += "⚠️ **PROTECTION INSUFFICIENT**\n"
-                results_text += f"Both images had successful face swaps (Original MSE: {mse_original:.0f}, Protected MSE: {mse_protected:.0f})\n"
+                results_text += f"Both swaps similar quality ({swap_orig}): Original MSE={mse_original:.0f}, Protected MSE={mse_protected:.0f}\n"
                 results_text += "**Action needed:** Increase epsilon to 0.25-0.30\n"
             else:
-                results_text += "⚠️ **TEST INCONCLUSIVE**\n"
-                results_text += "Face swap results unclear. Try different source face.\n"
+                results_text += "⚠️ **UNCLEAR RESULT**\n"
+                results_text += f"Original: MSE={mse_original:.0f} ({swap_orig}), Protected: MSE={mse_protected:.0f} ({swap_prot})\n"
         
         # Create visualization
         comparison = create_comparison_visualization(
@@ -396,6 +399,220 @@ class AntiDeepfakeApp:
             outputs=[test_output, test_results]
         )
     
+    def _create_face_swap_demo_tab(self):
+        """Create standalone face swap demo tab with direct uploads."""
+        gr.Markdown("""
+        ### 🎭 Face Swap Demo - Upload Any Images
+        
+        **Upload source and target images directly to test face swapping.**
+        
+        - **SOURCE**: Person whose face identity to extract
+        - **TARGET**: Person whose face will be replaced  
+        - **RESULT**: TARGET image with SOURCE person's face
+        
+        *Try with/without protection to see the difference!*
+        """)
+        
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("#### 📤 Upload Images")
+                
+                source_img = gr.Image(
+                    label="SOURCE (Identity Donor)",
+                    type="numpy",
+                    height=250,
+                    sources=["upload", "clipboard"]
+                )
+                
+                target_img = gr.Image(
+                    label="TARGET (Face to Replace)",
+                    type="numpy",
+                    height=250,
+                    sources=["upload", "clipboard"]
+                )
+                
+                with gr.Row():
+                    model_select = gr.Radio(
+                        choices=["InsightFace (inswapper)", "SimSwap"],
+                        value="SimSwap",
+                        label="Face Swap Model"
+                    )
+                
+                with gr.Row():
+                    apply_protection = gr.Checkbox(
+                        label="Apply FGSM Protection to Target",
+                        value=False,
+                        info="Test protection effectiveness"
+                    )
+                    epsilon_demo = gr.Slider(
+                        minimum=0.10,
+                        maximum=0.30,
+                        value=0.15,
+                        step=0.05,
+                        label="Protection Strength (ε)",
+                        visible=False
+                    )
+                
+                # Show epsilon slider when protection is enabled
+                apply_protection.change(
+                    fn=lambda x: gr.update(visible=x),
+                    inputs=[apply_protection],
+                    outputs=[epsilon_demo]
+                )
+                
+                with gr.Row():
+                    load_swap_model_btn = gr.Button("1️⃣ Load Model", variant="secondary")
+                    run_swap_btn = gr.Button("2️⃣ Swap Faces", variant="primary", size="lg")
+                
+                model_status = gr.Textbox(
+                    label="Model Status",
+                    value="Click 'Load Model' first",
+                    lines=2
+                )
+            
+            with gr.Column():
+                gr.Markdown("#### 📊 Results")
+                
+                result_grid = gr.Image(
+                    label="Comparison",
+                    type="numpy",
+                    height=500
+                )
+                
+                metrics_display = gr.Textbox(
+                    label="Metrics & Analysis",
+                    lines=12
+                )
+        
+        # Event handlers
+        load_swap_model_btn.click(
+            fn=self.load_deepfake_model,
+            inputs=[model_select],
+            outputs=[model_status]
+        )
+        
+        run_swap_btn.click(
+            fn=self._run_face_swap_demo,
+            inputs=[source_img, target_img, model_select, apply_protection, epsilon_demo],
+            outputs=[result_grid, metrics_display]
+        )
+    
+    def _run_face_swap_demo(
+        self,
+        source: np.ndarray,
+        target: np.ndarray,
+        model_choice: str,
+        apply_protection: bool,
+        epsilon: float
+    ):
+        """Run face swap demo with optional protection."""
+        
+        if source is None or target is None:
+            return None, "❌ Please upload both SOURCE and TARGET images"
+        
+        if not self.deepfake_model_loaded:
+            return None, "❌ Please load face swap model first (click '1️⃣ Load Model')"
+        
+        try:
+            import cv2
+            from app.demo_utils import create_side_by_side
+            
+            # Step 1: Optionally protect target
+            target_protected = None
+            if apply_protection and self.imputer:
+                target_protected = self.imputer.impute_from_array(target)
+            
+            # Step 2: Run face swap on original
+            swapped_orig, status_orig, metrics_orig = self.deepfake_tester.test_manipulation(
+                target, source
+            )
+            
+            # Step 3: Run face swap on protected (if enabled)
+            swapped_prot = None
+            metrics_prot = None
+            if apply_protection and target_protected is not None:
+                swapped_prot, status_prot, metrics_prot = self.deepfake_tester.test_manipulation(
+                    target_protected, source
+                )
+            
+            # Create visualization
+            if apply_protection and swapped_prot is not None:
+                # 2x2 grid: Source | Target | Swap Original | Swap Protected
+                h, w = 300, 300
+                
+                source_resized = cv2.resize(source, (w, h))
+                target_resized = cv2.resize(target, (w, h))
+                swapped_orig_resized = cv2.resize(swapped_orig, (w, h)) if swapped_orig is not None else np.zeros((h, w, 3), dtype=np.uint8)
+                swapped_prot_resized = cv2.resize(swapped_prot, (w, h))
+                
+                # Add labels
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(source_resized, 'SOURCE', (10, 30), font, 0.8, (255, 255, 255), 2)
+                cv2.putText(target_resized, 'TARGET', (10, 30), font, 0.8, (255, 255, 255), 2)
+                cv2.putText(swapped_orig_resized, 'SWAP (Original)', (10, 30), font, 0.7, (0, 255, 0), 2)
+                cv2.putText(swapped_prot_resized, f'SWAP (Protected ε={epsilon:.2f})', (10, 30), font, 0.6, (255, 0, 0), 2)
+                
+                # Stack
+                top_row = np.hstack([source_resized, target_resized])
+                bottom_row = np.hstack([swapped_orig_resized, swapped_prot_resized])
+                grid = np.vstack([top_row, bottom_row])
+                
+                # Format metrics
+                results = "## 📊 COMPARISON RESULTS\n\n"
+                results += "### Original Target (No Protection):\n"
+                results += f"- **Swap Strength**: {metrics_orig.get('swap_strength', 'N/A')}\n"
+                results += f"- **MSE**: {metrics_orig.get('mse', 0):.2f}\n"
+                results += f"- **PSNR**: {metrics_orig.get('psnr', 0):.2f} dB\n"
+                results += f"- **Corruption**: {metrics_orig.get('corruption_detected', False)}\n\n"
+                
+                results += f"### Protected Target (ε={epsilon:.2f}):\n"
+                results += f"- **Swap Strength**: {metrics_prot.get('swap_strength', 'N/A')}\n"
+                results += f"- **MSE**: {metrics_prot.get('mse', 0):.2f}\n"
+                results += f"- **PSNR**: {metrics_prot.get('psnr', 0):.2f} dB\n"
+                results += f"- **Corruption**: {metrics_prot.get('corruption_detected', False)}\n\n"
+                
+                # Verdict
+                results += "### 🎯 Protection Effectiveness:\n"
+                orig_strength = metrics_orig.get('swap_strength', 'Strong')
+                prot_strength = metrics_prot.get('swap_strength', 'Weak')
+                
+                if prot_strength == 'Failed' or metrics_prot.get('corruption_detected'):
+                    results += "✅ **EXCELLENT**: Protection prevented face swap!\n"
+                elif orig_strength == 'Strong' and prot_strength in ['Weak', 'Medium']:
+                    results += "✅ **GOOD**: Protection degraded swap quality\n"
+                else:
+                    results += "⚠️ **LIMITED**: Try higher epsilon (0.25-0.30)\n"
+                
+            else:
+                # Single swap result
+                h = 400
+                source_resized = cv2.resize(source, (h, h))
+                target_resized = cv2.resize(target, (h, h))
+                swapped_resized = cv2.resize(swapped_orig, (h, h)) if swapped_orig is not None else np.zeros((h, h, 3), dtype=np.uint8)
+                
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(source_resized, 'SOURCE', (10, 30), font, 1, (255, 255, 255), 2)
+                cv2.putText(target_resized, 'TARGET', (10, 30), font, 1, (255, 255, 255), 2)
+                cv2.putText(swapped_resized, 'RESULT', (10, 30), font, 1, (0, 255, 0), 2)
+                
+                grid = np.hstack([source_resized, target_resized, swapped_resized])
+                
+                results = "## 📊 FACE SWAP RESULTS\n\n"
+                results += f"**Status**: {status_orig}\n\n"
+                results += "### Metrics:\n"
+                results += f"- **Swap Strength**: {metrics_orig.get('swap_strength', 'N/A')}\n"
+                results += f"- **MSE**: {metrics_orig.get('mse', 0):.2f}\n"
+                results += f"- **PSNR**: {metrics_orig.get('psnr', 0):.2f} dB\n"
+                results += f"- **Corruption**: {metrics_orig.get('corruption_detected', False)}\n\n"
+                results += "*💡 Enable 'Apply FGSM Protection' to test defense effectiveness*"
+            
+            return grid, results
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
+            return None, error_msg
+    
     def create_interface(self) -> gr.Blocks:
         """Create Gradio interface."""
         
@@ -427,6 +644,10 @@ class AntiDeepfakeApp:
                 # Tab 2: Test Protection
                 with gr.Tab("🧪 Test Protection"):
                     self._create_testing_tab(original_state, protected_state)
+                
+                # Tab 3: Face Swap Demo
+                with gr.Tab("🎭 Face Swap Demo"):
+                    self._create_face_swap_demo_tab()
             
             # Model info footer
             model_status = "✓ Model loaded" if self.imputer else "⚠ Demo mode (no model)"
