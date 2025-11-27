@@ -262,7 +262,13 @@ def main():
     parser.add_argument(
         '--max_samples',
         type=int,
-        help='Maximum number of samples to use'
+        help='Maximum number of samples to use (for splitting existing datasets)'
+    )
+    parser.add_argument(
+        '--num_samples',
+        type=int,
+        default=500,
+        help='Number of samples per split for sample dataset (default: 500)'
     )
     parser.add_argument(
         '--verify',
@@ -326,7 +332,7 @@ def main():
         verify_dataset(args.output_dir)
     
     elif args.dataset == 'sample':
-        create_sample_dataset(args.output_dir, num_samples=100)
+        create_sample_dataset(args.output_dir, num_samples=args.num_samples)
     
     print("\n✓ Dataset preparation complete!")
 
