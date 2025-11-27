@@ -13,17 +13,27 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 def find_uploaded_images():
-    """Find uploaded images in /content/"""
-    content_dir = Path('/content')
+    """Find uploaded images in current directory and /content/"""
+    # Check multiple locations
+    search_dirs = [
+        Path.cwd(),  # Current working directory
+        Path('/content'),  # Colab default
+        Path('/root/.simswap/checkpoints/SimSwap'),  # Where we are now
+    ]
     
     # Look for common image extensions
     extensions = ['*.jpg', '*.JPG', '*.jpeg', '*.JPEG', '*.png', '*.PNG']
     found = []
     
-    for ext in extensions:
-        found.extend(content_dir.glob(ext))
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for ext in extensions:
+            found.extend(search_dir.glob(ext))
     
-    return sorted(found)
+    # Remove duplicates and sort
+    found = list(set(found))
+    return sorted(found, key=lambda x: x.stat().st_mtime, reverse=True)  # Most recent first
 
 def test_simswap():
     print("="*70)
@@ -32,13 +42,14 @@ def test_simswap():
     
     # Find uploaded images
     print("\n1. Finding uploaded images...")
+    print(f"   Searching in: {Path.cwd()}")
     images = find_uploaded_images()
     
     if not images:
-        print("❌ No images found in /content/")
-        print("Please upload images using:")
-        print("  from google.colab import files")
-        print("  uploaded = files.upload()")
+        print("❌ No images found!")
+        print(f"   Current directory: {Path.cwd()}")
+        print(f"   Files here: {list(Path.cwd().glob('*'))[:10]}")
+        print("\nPlease ensure images are uploaded in the current directory.")
         return False
     
     print(f"✅ Found {len(images)} image(s):")
