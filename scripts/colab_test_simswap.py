@@ -57,7 +57,7 @@ def test_simswap():
         size_mb = img.stat().st_size / (1024*1024)
         print(f"   [{i}] {img.name} ({size_mb:.2f} MB)")
     
-    # Select source and target
+    # Select source and target - prefer different images by name
     if len(images) < 2:
         print("\n❌ Need at least 2 images")
         print("   - Image 1: SOURCE (whose face identity to extract)")
@@ -65,8 +65,21 @@ def test_simswap():
         print("Upload more images and try again.")
         return False
     
-    source_path = images[0]  # Image 1: Person A's face (identity to steal)
-    target_path = images[1]  # Image 2: Person B's face (will be replaced with A's identity)
+    # Smart selection: try to pick different people
+    # Look for images with different base names
+    pic2_images = [img for img in images if 'PIC2' in img.name or 'pic2' in img.name.lower()]
+    other_images = [img for img in images if 'PIC2' not in img.name and 'pic2' not in img.name.lower()]
+    
+    if pic2_images and other_images:
+        # Use different people
+        source_path = pic2_images[0]  # PIC2 = Person A
+        target_path = other_images[0]  # Other = Person B
+        print(f"\n✅ Detected different people!")
+    else:
+        # Fallback to most recent
+        source_path = images[0]
+        target_path = images[1]
+        print(f"\n⚠️  Warning: May be swapping same person (weak result)")
     
     print(f"\n2. Face Swap Setup:")
     print(f"   SOURCE (identity): {source_path.name} - Extract face identity from this person")
