@@ -25,9 +25,9 @@ class TargetedNoiseImputer:
     def __init__(
         self,
         model_path: str,
-        epsilon: float = 0.30,
-        target_regions: List[str] = ['left_eyebrow', 'right_eyebrow', 'nose_tip', 'inner_eyes'],
-        feather_radius: int = 20,
+        epsilon: float = 0.40,
+        target_regions: List[str] = ['face_contour', 'jawline', 'nose_bridge'],
+        feather_radius: int = 25,
         device: str = 'auto'
     ):
         """
@@ -35,8 +35,8 @@ class TargetedNoiseImputer:
             model_path: Path to trained FGSM model
             epsilon: Perturbation strength (higher = more protection, less visible with targeting)
             target_regions: Which facial features to protect
-                Options: 'left_eyebrow', 'right_eyebrow', 'nose_tip', 'nose_bridge',
-                        'inner_eyes' (eye corners), 'hairline', 'nostrils'
+                Options: 'face_contour', 'jawline', 'cheekbones', 'nose_bridge',
+                        'eye_sockets', 'forehead_edges'
             feather_radius: Smooth transition at mask edges (reduces visibility)
             device: 'cuda', 'cpu', or 'auto'
         """
@@ -105,57 +105,91 @@ class TargetedNoiseImputer:
         # Get 5-point landmarks: left_eye, right_eye, nose, left_mouth, right_mouth
         kps = face.kps.astype(np.int32)
         
-        # Get face bounding box for additional features
+        # Get face bounding box
         bbox = face.bbox.astype(np.int32)
+        face_w = bbox[2] - bbox[0]
+        face_h = bbox[3] - bbox[1]
         
-        # Define landmark indices and derived points
+        # Define basic landmarks
         left_eye = kps[0]
         right_eye = kps[1]
         nose_tip = kps[2]
         left_mouth = kps[3]
         right_mouth = kps[4]
         
-        # Calculate additional feature points
-        eye_center_y = (left_eye[1] + right_eye[1]) // 2
         eye_distance = int(np.linalg.norm(right_eye - left_eye))
         
-        # Eyebrow positions (above eyes)
-        left_eyebrow = np.array([left_eye[0], left_eye[1] - int(eye_distance * 0.3)])
-        right_eyebrow = np.array([right_eye[0], right_eye[1] - int(eye_distance * 0.3)])
+        # Calculate face structure lines/edges
+        face_center_x = (bbox[0] + bbox[2]) // 2
+        face_center_y = (bbox[1] + bbox[3]) // 2
         
-        # Nose bridge (between eyes)
-        nose_bridge = np.array([
-            (left_eye[0] + right_eye[0]) // 2,
-            eye_center_y
-        ])
+        # Jawline points (bottom curve of face)
+        jaw_left = np.array([bbox[0] + int(face_w * 0.1), bbox[3] - int(face_h * 0.15)])
+        jaw_right = np.array([bbox[2] - int(face_w * 0.1), bbox[3] - int(face_h * 0.15)])
+        jaw_center = np.array([face_center_x, bbox[3] - int(face_h * 0.05)])
         
-        # Nostrils (below and beside nose tip)
-        nostril_offset = int(eye_distance * 0.15)
-        left_nostril = np.array([nose_tip[0] - nostril_offset, nose_tip[1] + nostril_offset // 2])
-        right_nostril = np.array([nose_tip[0] + nostril_offset, nose_tip[1] + nostril_offset // 2])
+        # Cheekbone points (sides of face at eye level)
+        cheek_left = np.array([bbox[0] + int(face_w * 0.05), left_eye[1]])
+        cheek_right = np.array([bbox[2] - int(face_w * 0.05), right_eye[1]])
         
-        # Inner eye corners (tearducts)
-        inner_left_eye = np.array([left_eye[0] + int(eye_distance * 0.15), left_eye[1]])
-        inner_right_eye = np.array([right_eye[0] - int(eye_distance * 0.15), right_eye[1]])
+        # Face contour (oval outline)
+        contour_top = np.array([face_center_x, bbox[1] + int(face_h * 0.15)])
+        contour_left_top = np.array([bbox[0] + int(face_w * 0.08), bbox[1] + int(face_h * 0.3)])
+        contour_right_top = np.array([bbox[2] - int(face_w * 0.08), bbox[1] + int(face_h * 0.3)])
+        contour_left_mid = np.array([bbox[0] + int(face_w * 0.03), face_center_y])
+        contour_right_mid = np.array([bbox[2] - int(face_w * 0.03), face_center_y])
         
-        # Hairline (top of forehead)
-        hairline = np.array([(left_eye[0] + right_eye[0]) // 2, bbox[1] + int(eye_distance * 0.2)])
+        # Nose bridge (vertical line from eyes to nose)
+        nose_bridge_top = np.array([face_center_x, (left_eye[1] + right_eye[1]) // 2])
+        nose_bridge_mid = np.array([face_center_x, (nose_bridge_top[1] + nose_tip[1]) // 2])
+        
+        # Eye sockets (bone structure around eyes)
+        left_eye_socket_inner = np.array([left_eye[0] + int(eye_distance * 0.2), left_eye[1]])
+        left_eye_socket_outer = np.array([left_eye[0] - int(eye_distance * 0.15), left_eye[1]])
+        right_eye_socket_inner = np.array([right_eye[0] - int(eye_distance * 0.2), right_eye[1]])
+        right_eye_socket_outer = np.array([right_eye[0] + int(eye_distance * 0.15), right_eye[1]])
+        
+        # Forehead edges
+        forehead_left = np.array([bbox[0] + int(face_w * 0.15), bbox[1] + int(face_h * 0.2)])
+        forehead_right = np.array([bbox[2] - int(face_w * 0.15), bbox[1] + int(face_h * 0.2)])
         
         landmarks = {
+            # Individual points
             'left_eye': left_eye,
             'right_eye': right_eye,
             'nose_tip': nose_tip,
-            'left_eyebrow': left_eyebrow,
-            'right_eyebrow': right_eyebrow,
-            'nose_bridge': nose_bridge,
-            'left_nostril': left_nostril,
-            'right_nostril': right_nostril,
-            'nostrils': nose_tip,  # Alias for both
-            'inner_left_eye': inner_left_eye,
-            'inner_right_eye': inner_right_eye,
-            'inner_eyes': nose_bridge,  # Alias for area between eyes
-            'hairline': hairline,
-            'mouth': (left_mouth + right_mouth) // 2
+            
+            # Jawline
+            'jaw_left': jaw_left,
+            'jaw_right': jaw_right,
+            'jaw_center': jaw_center,
+            'jawline': [jaw_left, jaw_center, jaw_right],  # Line
+            
+            # Cheekbones
+            'cheek_left': cheek_left,
+            'cheek_right': cheek_right,
+            'cheekbones': [cheek_left, cheek_right],
+            
+            # Face contour (outline)
+            'contour_top': contour_top,
+            'face_contour': [contour_left_top, contour_left_mid, jaw_left, 
+                           contour_right_top, contour_right_mid, jaw_right],
+            
+            # Nose bridge
+            'nose_bridge_top': nose_bridge_top,
+            'nose_bridge_mid': nose_bridge_mid,
+            'nose_bridge': [nose_bridge_top, nose_bridge_mid, nose_tip],
+            
+            # Eye sockets
+            'left_eye_socket': [left_eye_socket_inner, left_eye_socket_outer],
+            'right_eye_socket': [right_eye_socket_inner, right_eye_socket_outer],
+            'eye_sockets': [left_eye_socket_inner, left_eye_socket_outer, 
+                          right_eye_socket_inner, right_eye_socket_outer],
+            
+            # Forehead
+            'forehead_left': forehead_left,
+            'forehead_right': forehead_right,
+            'forehead_edges': [forehead_left, forehead_right],
         }
         
         region_info = {'landmarks': landmarks, 'regions_protected': []}
@@ -165,30 +199,42 @@ class TargetedNoiseImputer:
             if region_name not in landmarks:
                 continue
             
-            point = landmarks[region_name]
+            landmark_data = landmarks[region_name]
             
-            # Determine region size based on feature (smaller = less visible)
-            if 'eyebrow' in region_name:
-                radius = int(w * 0.025)  # 2.5% - very small, just eyebrow hair
-            elif 'nose_tip' in region_name:
-                radius = int(w * 0.02)  # 2% - just the tip
-            elif 'nose_bridge' in region_name:
-                radius = int(w * 0.03)  # 3% - bridge area
-            elif 'nostril' in region_name or region_name == 'nostrils':
-                radius = int(w * 0.015)  # 1.5% - tiny nostril holes
-            elif 'inner' in region_name:
-                radius = int(w * 0.02)  # 2% - eye corners/tearducts
-            elif 'hairline' in region_name:
-                radius = int(w * 0.04)  # 4% - hairline edge
-            elif 'eye' in region_name:
-                radius = int(w * 0.035)  # 3.5% - smaller than before
-            elif region_name == 'mouth':
-                radius = int(w * 0.05)  # 5%
+            # Handle both single points and lines (lists of points)
+            points_to_draw = []
+            if isinstance(landmark_data, list):
+                points_to_draw = landmark_data
             else:
-                radius = int(w * 0.03)  # 3% default
+                points_to_draw = [landmark_data]
             
-            # Draw circular region
-            cv2.circle(mask, tuple(point), radius, 1.0, -1)
+            # Determine region size based on feature (lines are longer/thinner)
+            if 'contour' in region_name or 'jawline' in region_name:
+                radius = int(w * 0.015)  # 1.5% - thin line along edges
+            elif 'cheekbone' in region_name:
+                radius = int(w * 0.02)  # 2% - cheekbone edges
+            elif 'nose_bridge' in region_name:
+                radius = int(w * 0.018)  # 1.8% - thin nose line
+            elif 'eye_socket' in region_name:
+                radius = int(w * 0.015)  # 1.5% - socket edges
+            elif 'forehead' in region_name:
+                radius = int(w * 0.02)  # 2% - forehead edges
+            else:
+                radius = int(w * 0.02)  # 2% default
+            
+            # Draw circles at each point (or draw line between points)
+            if len(points_to_draw) > 1:
+                # Draw line connecting points
+                for i in range(len(points_to_draw) - 1):
+                    pt1 = tuple(points_to_draw[i])
+                    pt2 = tuple(points_to_draw[i + 1])
+                    cv2.line(mask, pt1, pt2, 1.0, thickness=radius)
+                # Also draw circles at endpoints
+                for point in points_to_draw:
+                    cv2.circle(mask, tuple(point), radius, 1.0, -1)
+            else:
+                # Single point - draw circle
+                cv2.circle(mask, tuple(points_to_draw[0]), radius, 1.0, -1)
             region_info['regions_protected'].append({
                 'name': region_name,
                 'center': point.tolist(),
