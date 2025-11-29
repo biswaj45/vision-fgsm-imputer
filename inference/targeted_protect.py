@@ -49,7 +49,7 @@ class TargetedNoiseImputer:
         self.feather_radius = feather_radius
         
         # Load FGSM model
-        from training.model import TinyUNet
+        from models.unet_tiny import TinyUNet
         self.model = TinyUNet()
         checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
