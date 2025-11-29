@@ -99,10 +99,7 @@ def main():
     from inference.targeted_protect import TargetedNoiseImputer
     
     # Configuration
-    model_path = str(project_root / 'models' / 'best.pth')
-    epsilon = 0.30
-    # Configuration
-    model_path = str(project_root / 'models' / 'best.pth')
+    model_path = str(project_root / 'saved_models' / 'best.pth')
     epsilon = 0.30
     
     # Load target image
