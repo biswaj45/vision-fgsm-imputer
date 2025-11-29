@@ -116,12 +116,12 @@ def main():
     protected_global = global_imputer.impute_from_array(original)
     
     # Method 2: Targeted protection (new)
-    print("\n2️⃣ TARGETED PROTECTION (eyes + nose only):")
+    print("\n2️⃣ TARGETED PROTECTION (eyebrows + nose details only):")
     targeted_imputer = TargetedNoiseImputer(
         model_path=model_path,
         epsilon=epsilon,
-        target_regions=['left_eye', 'right_eye', 'nose'],
-        feather_radius=15
+        target_regions=['left_eyebrow', 'right_eyebrow', 'nose_tip', 'nostrils', 'inner_eyes'],
+        feather_radius=20  # More feathering for smoother edges
     )
     protected_targeted, mask_vis, region_info = targeted_imputer.impute_from_array(
         original,

@@ -26,8 +26,8 @@ class TargetedNoiseImputer:
         self,
         model_path: str,
         epsilon: float = 0.30,
-        target_regions: List[str] = ['left_eye', 'right_eye', 'nose'],
-        feather_radius: int = 15,
+        target_regions: List[str] = ['left_eyebrow', 'right_eyebrow', 'nose_tip', 'inner_eyes'],
+        feather_radius: int = 20,
         device: str = 'auto'
     ):
         """
@@ -35,7 +35,8 @@ class TargetedNoiseImputer:
             model_path: Path to trained FGSM model
             epsilon: Perturbation strength (higher = more protection, less visible with targeting)
             target_regions: Which facial features to protect
-                Options: 'left_eye', 'right_eye', 'nose', 'mouth'
+                Options: 'left_eyebrow', 'right_eyebrow', 'nose_tip', 'nose_bridge',
+                        'inner_eyes' (eye corners), 'hairline', 'nostrils'
             feather_radius: Smooth transition at mask edges (reduces visibility)
             device: 'cuda', 'cpu', or 'auto'
         """
@@ -104,12 +105,57 @@ class TargetedNoiseImputer:
         # Get 5-point landmarks: left_eye, right_eye, nose, left_mouth, right_mouth
         kps = face.kps.astype(np.int32)
         
-        # Define landmark indices
+        # Get face bounding box for additional features
+        bbox = face.bbox.astype(np.int32)
+        
+        # Define landmark indices and derived points
+        left_eye = kps[0]
+        right_eye = kps[1]
+        nose_tip = kps[2]
+        left_mouth = kps[3]
+        right_mouth = kps[4]
+        
+        # Calculate additional feature points
+        eye_center_y = (left_eye[1] + right_eye[1]) // 2
+        eye_distance = int(np.linalg.norm(right_eye - left_eye))
+        
+        # Eyebrow positions (above eyes)
+        left_eyebrow = np.array([left_eye[0], left_eye[1] - int(eye_distance * 0.3)])
+        right_eyebrow = np.array([right_eye[0], right_eye[1] - int(eye_distance * 0.3)])
+        
+        # Nose bridge (between eyes)
+        nose_bridge = np.array([
+            (left_eye[0] + right_eye[0]) // 2,
+            eye_center_y
+        ])
+        
+        # Nostrils (below and beside nose tip)
+        nostril_offset = int(eye_distance * 0.15)
+        left_nostril = np.array([nose_tip[0] - nostril_offset, nose_tip[1] + nostril_offset // 2])
+        right_nostril = np.array([nose_tip[0] + nostril_offset, nose_tip[1] + nostril_offset // 2])
+        
+        # Inner eye corners (tearducts)
+        inner_left_eye = np.array([left_eye[0] + int(eye_distance * 0.15), left_eye[1]])
+        inner_right_eye = np.array([right_eye[0] - int(eye_distance * 0.15), right_eye[1]])
+        
+        # Hairline (top of forehead)
+        hairline = np.array([(left_eye[0] + right_eye[0]) // 2, bbox[1] + int(eye_distance * 0.2)])
+        
         landmarks = {
-            'left_eye': kps[0],
-            'right_eye': kps[1],
-            'nose': kps[2],
-            'mouth': (kps[3] + kps[4]) // 2  # Center of mouth
+            'left_eye': left_eye,
+            'right_eye': right_eye,
+            'nose_tip': nose_tip,
+            'left_eyebrow': left_eyebrow,
+            'right_eyebrow': right_eyebrow,
+            'nose_bridge': nose_bridge,
+            'left_nostril': left_nostril,
+            'right_nostril': right_nostril,
+            'nostrils': nose_tip,  # Alias for both
+            'inner_left_eye': inner_left_eye,
+            'inner_right_eye': inner_right_eye,
+            'inner_eyes': nose_bridge,  # Alias for area between eyes
+            'hairline': hairline,
+            'mouth': (left_mouth + right_mouth) // 2
         }
         
         region_info = {'landmarks': landmarks, 'regions_protected': []}
@@ -121,15 +167,25 @@ class TargetedNoiseImputer:
             
             point = landmarks[region_name]
             
-            # Determine region size based on feature
-            if 'eye' in region_name:
-                radius = int(w * 0.04)  # 4% of image width
-            elif region_name == 'nose':
-                radius = int(w * 0.05)  # 5% of image width
+            # Determine region size based on feature (smaller = less visible)
+            if 'eyebrow' in region_name:
+                radius = int(w * 0.025)  # 2.5% - very small, just eyebrow hair
+            elif 'nose_tip' in region_name:
+                radius = int(w * 0.02)  # 2% - just the tip
+            elif 'nose_bridge' in region_name:
+                radius = int(w * 0.03)  # 3% - bridge area
+            elif 'nostril' in region_name or region_name == 'nostrils':
+                radius = int(w * 0.015)  # 1.5% - tiny nostril holes
+            elif 'inner' in region_name:
+                radius = int(w * 0.02)  # 2% - eye corners/tearducts
+            elif 'hairline' in region_name:
+                radius = int(w * 0.04)  # 4% - hairline edge
+            elif 'eye' in region_name:
+                radius = int(w * 0.035)  # 3.5% - smaller than before
             elif region_name == 'mouth':
-                radius = int(w * 0.06)  # 6% of image width
+                radius = int(w * 0.05)  # 5%
             else:
-                radius = int(w * 0.05)
+                radius = int(w * 0.03)  # 3% default
             
             # Draw circular region
             cv2.circle(mask, tuple(point), radius, 1.0, -1)
