@@ -16,9 +16,11 @@ def find_uploaded_images():
     """Find uploaded images in current directory and /content/"""
     # Check multiple locations
     search_dirs = [
-        Path.cwd(),  # Current working directory
         Path('/content'),  # Colab default
-        Path('/root/.simswap/checkpoints/SimSwap'),  # Where we are now
+        Path.cwd(),  # Current working directory
+        Path('/content/vision-fgsm-imputer'),
+        Path('/content/vision-fgsm-imputer/test_images'),
+        Path('/root/.simswap/checkpoints/SimSwap'),
     ]
     
     # Look for common image extensions
@@ -29,10 +31,14 @@ def find_uploaded_images():
         if not search_dir.exists():
             continue
         for ext in extensions:
+            # Search recursively up to 2 levels deep
             found.extend(search_dir.glob(ext))
+            found.extend(search_dir.glob(f'*/{ext}'))
     
     # Remove duplicates and sort
     found = list(set(found))
+    # Filter out sample images
+    found = [f for f in found if 'sample_data' not in str(f)]
     return sorted(found, key=lambda x: x.stat().st_mtime, reverse=True)  # Most recent first
 
 def test_simswap():
@@ -48,8 +54,27 @@ def test_simswap():
     if not images:
         print("❌ No images found!")
         print(f"   Current directory: {Path.cwd()}")
-        print(f"   Files here: {list(Path.cwd().glob('*'))[:10]}")
-        print("\nPlease ensure images are uploaded in the current directory.")
+        print(f"   Searched locations:")
+        for d in [Path('/content'), Path('/content/vision-fgsm-imputer'), Path('/content/vision-fgsm-imputer/test_images')]:
+            print(f"     • {d} (exists: {d.exists()})")
+        print("\n📤 Upload images using one of these methods:")
+        print("   1. Drag & drop files to Colab file browser (left sidebar)")
+        print("   2. Use: from google.colab import files; uploaded = files.upload()")
+        print("   3. Mount Google Drive and copy images\n")
+        
+        # Offer to upload now
+        try:
+            print("Upload 2 images now? (y/n)")
+            from google.colab import files
+            print("\n📤 Click 'Choose Files' to upload SOURCE and TARGET images...")
+            uploaded = files.upload()
+            if len(uploaded) >= 2:
+                print(f"✅ Uploaded {len(uploaded)} files. Retrying...")
+                return test_simswap()  # Retry
+            else:
+                print("❌ Need at least 2 images. Please upload more.")
+        except:
+            pass
         return False
     
     print(f"✅ Found {len(images)} image(s):")

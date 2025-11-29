@@ -51,95 +51,79 @@ class SimSwapTester:
             self.app.prepare(ctx_id=-1, det_size=(640, 640))
             print("✅ Face detector loaded")
             
-            # Download SimSwap model if not exists
-            model_dir = Path.home() / '.simswap' / 'checkpoints'
-            model_dir.mkdir(parents=True, exist_ok=True)
-            model_path = model_dir / 'simswap_224.pth'
-            
-            # Also check for the archive format
-            archive_dir = model_dir / 'SimSwap' / 'arcface_model' / 'archive'
-            
-            if not model_path.exists():
-                # Check if we have the archive format already
-                if archive_dir.exists():
-                    print("Converting existing archive format to .pth...")
-                    try:
-                        checkpoint = torch.load(str(archive_dir), map_location='cpu')
-                        torch.save(checkpoint, str(model_path))
-                        print("✅ Model converted from archive format!")
-                    except Exception as e:
-                        print(f"Failed to convert archive: {e}")
-                else:
-                    print("Downloading SimSwap model (~200MB, one-time download)...")
-                    # Try multiple sources - download the zip archive
-                    sources = [
-                        ('https://github.com/neuralchen/SimSwap/releases/download/1.0/arcface_checkpoint.tar', 'GitHub'),
-                    ]
-                    
-                    downloaded = False
-                    tar_path = model_dir / 'arcface_checkpoint.tar'
-                    
-                    for url, source in sources:
-                        try:
-                            print(f"Trying {source}...")
-                            import urllib.request
-                            urllib.request.urlretrieve(url, str(tar_path))
-                            print(f"✅ Downloaded from {source}!")
-                            
-                            # Extract using zipfile (it's actually a zip despite .tar extension)
-                            import zipfile
-                            extract_dir = model_dir / 'SimSwap' / 'arcface_model'
-                            extract_dir.mkdir(parents=True, exist_ok=True)
-                            
-                            with zipfile.ZipFile(str(tar_path), 'r') as zip_ref:
-                                zip_ref.extractall(str(extract_dir))
-                            print("✅ Extracted archive!")
-                            
-                            # Convert to .pth format (load tar directly as it's a PyTorch zip)
-                            checkpoint = torch.load(str(tar_path), map_location='cpu', weights_only=False)
-                            torch.save(checkpoint, str(model_path))
-                            print("✅ Model converted successfully!")
-                            downloaded = True
-                            
-                            # Cleanup
-                            tar_path.unlink()
-                            break
-                        except Exception as e:
-                            print(f"Failed from {source}: {e}")
-                            continue
-                    
-                    if not downloaded:
-                        return False, (
-                            "❌ Failed to download SimSwap model from all sources.\n"
-                            "Please download manually from:\n"
-                            "https://github.com/neuralchen/SimSwap\n"
-                            "Or use InsightFace (inswapper) instead."
-                        )
-            
-            # Load ArcFace model for face embeddings
+            # Check multiple possible locations for ArcFace model
             print("Loading ArcFace model for embeddings...")
-            try:
-                from pathlib import Path as PathLib
-                arcface_path = PathLib(__file__).parent.parent / 'arcface_model' / 'arcface_checkpoint.tar'
+            
+            # Try multiple paths where models might exist
+            project_root = Path(__file__).parent.parent
+            arcface_paths = [
+                project_root / 'arcface_model' / 'arcface_checkpoint.tar',  # Project location
+                Path.home() / '.simswap' / 'checkpoints' / 'SimSwap' / 'arcface_model' / 'arcface_checkpoint.tar',
+                Path.home() / '.insightface' / 'models' / 'buffalo_l' / 'w600k_r50.onnx',
+            ]
+            
+            arcface_loaded = False
+            for arcface_path in arcface_paths:
                 if arcface_path.exists():
-                    self.arcface = torch.load(str(arcface_path), map_location=self.device, weights_only=False)
-                else:
-                    self.arcface = torch.load(model_path, map_location=self.device, weights_only=False)
-                if hasattr(self.arcface, 'eval'):
-                    self.arcface.eval()
-                print("✅ ArcFace model loaded (for face embeddings)")
-            except Exception as e:
-                print(f"Warning loading ArcFace: {e}")
+                    print(f"Found ArcFace at: {arcface_path}")
+                    try:
+                        if arcface_path.suffix == '.tar':
+                            self.arcface = torch.load(str(arcface_path), map_location=self.device, weights_only=False)
+                            if hasattr(self.arcface, 'eval'):
+                                self.arcface.eval()
+                            arcface_loaded = True
+                            print(f"✅ ArcFace loaded ({arcface_path.stat().st_size / 1024**2:.1f} MB)")
+                            break
+                        elif arcface_path.suffix == '.onnx':
+                            # Use InsightFace's built-in model
+                            print("✅ Using InsightFace ArcFace (buffalo_l)")
+                            arcface_loaded = True
+                            break
+                    except Exception as e:
+                        print(f"Warning loading from {arcface_path}: {e}")
+                        continue
+            
+            if not arcface_loaded:
+                print("⚠️  ArcFace not found in standard locations")
+                print("   Attempting to use InsightFace's built-in embeddings...")
+                # Will use InsightFace's face embeddings instead
             
             # Load SimSwap Generator
             print("Loading SimSwap Generator...")
-            from pathlib import Path as PathLib
-            generator_path = PathLib(__file__).parent.parent / 'checkpoints' / 'people' / 'latest_net_G.pth'
             
-            if not generator_path.exists():
-                print(f"❌ Generator not found at {generator_path}")
-                print("Please download from: https://drive.google.com/drive/folders/1jV6_0FIMPC53FZ2HzZNJZGMe55bbu17R")
-                return False, "❌ SimSwap Generator model not found!"
+            # Check multiple possible locations for generator
+            generator_paths = [
+                project_root / 'checkpoints' / 'people' / 'latest_net_G.pth',  # Project location
+                Path.home() / '.simswap' / 'checkpoints' / 'people' / 'latest_net_G.pth',
+                Path('/content/vision-fgsm-imputer/checkpoints/people/latest_net_G.pth'),  # Colab
+            ]
+            
+            generator_path = None
+            for gp in generator_paths:
+                if gp.exists():
+                    generator_path = gp
+                    print(f"Found Generator at: {generator_path}")
+                    print(f"Size: {generator_path.stat().st_size / 1024**2:.1f} MB")
+                    break
+            
+            if not generator_path or not generator_path.exists():
+                error_msg = (
+                    "❌ SimSwap Generator not found!\n\n"
+                    "Expected locations:\n"
+                )
+                for gp in generator_paths:
+                    error_msg += f"  • {gp}\n"
+                error_msg += (
+                    "\nDownload required files:\n"
+                    "1. ArcFace (~200MB): https://drive.google.com/file/d/1KW7bjndL3QG3sxBbZxreGHigcCCpsDgn/view\n"
+                    "   Save to: arcface_model/arcface_checkpoint.tar\n\n"
+                    "2. Generator (~210MB): https://drive.google.com/file/d/1TY2YSajIx-Zqwqj_IZ0rIh7LfSIsrV_V/view\n"
+                    "   Save to: checkpoints/people/latest_net_G.pth\n\n"
+                    "Quick download:\n"
+                    "  !pip install gdown\n"
+                    "  !python scripts/setup_simswap_models.py\n"
+                )
+                return False, error_msg
             
             # Import official architecture
             try:
